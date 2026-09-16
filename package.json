@@ -1,6 +1,6 @@
 {
   "name": "jumbo-vulcheck-userscript",
   "private": true,
-  "scripts": { "test": "node --test tests" },
+  "scripts": { "test": "node --test tests/checklist.test.cjs" },
   "devDependencies": { "jsdom": "26.1.0" }
 }

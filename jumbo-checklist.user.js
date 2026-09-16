@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.3.0
+// @version      0.3.2
 // @description  Bewaar Jumbo-producten in een eenvoudige lokale productlijst.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -181,12 +181,35 @@
   if (window.top !== window.self || window.__ovVulcheck) return;
   window.__ovVulcheck = true;
 
+  const BACK_SELECTOR = 'button[data-button-id="p.Producten.Article_Details.actionButton7"], .productpage button.mx-name-actionButton7';
+  let backRecoveryTimer;
+  function backPage(button = document.querySelector(BACK_SELECTOR)) {
+    return isProductPage(location.href) && button ? { url: location.href, button } : null;
+  }
+  function recoverBack(page, delay) {
+    if (!page) return;
+    clearTimeout(backRecoveryTimer);
+    backRecoveryTimer = setTimeout(() => {
+      const { button, url } = page;
+      // Give Mendix time to close the screen. Never redirect a new or hidden page.
+      if (location.href === url && button.isConnected && button.getClientRects().length &&
+          !button.closest('[hidden], [aria-hidden="true"]')) location.assign('/');
+    }, delay);
+  }
+  document.addEventListener('click', event => {
+    const back = event.target instanceof Element && event.target.closest(BACK_SELECTOR);
+    if (!back || back.disabled || back.dataset.disabled === 'true') return;
+    // Also works in Safari's isolated world, where network hooks may be unavailable.
+    recoverBack(backPage(back), 2500);
+  }, true);
+
   const decoder = createDecoder();
   let current = null, generation = 0, entries = [], storageBroken = false;
   let render = () => {}, notify = () => {}, requestsSeen = 0;
   let pageProduct = null, pageUrl = location.href, staleArticle = null;
   function refreshPage() {
     if (pageUrl !== location.href) {
+      clearTimeout(backRecoveryTimer);
       staleArticle = pageProduct?.article || current?.article || null;
       pageUrl = location.href;
       generation++; decoder.reset(); current = null;
@@ -230,10 +253,16 @@
       ['SearchString', 'ScanString'].some(k => typeof o.members?.[k]?.value === 'string' && o.members[k].value.trim()));
     const bootstrap = request?.action === 'get_session_data';
     if (search || bootstrap) { generation++; decoder.reset(); current = null; render(); }
-    return { generation, bootstrap: bootstrap && /\/artikel\//.test(request?.params?.referrer || '') };
+    return { generation, backPage: backPage(), bootstrap: bootstrap && /\/artikel\//.test(request?.params?.referrer || '') };
   }
   function receive(data, context) {
     if (context.generation !== generation) return;
+    // The native close can succeed on the server but leave a deep-linked page
+    // visible because there is no previous Mendix page in this runtime.
+    if (data?.instructions?.some(instruction => instruction.type === 'close') &&
+        Object.values(data.changes || {}).some(change => change?._PDPClosed?.value === true)) {
+      recoverBack(context.backPage, 300);
+    }
     try { requestsSeen++; current = decoder.ingest(data, context.bootstrap); render(); }
     catch { current = null; render(); }
   }
@@ -345,7 +374,15 @@
       if (!unique.size) list.append(el('li', storageBroken ? 'Je opgeslagen lijst kan niet worden gelezen.' : 'Je lijst is nog leeg.', 'empty'));
       for (const p of unique.values()) {
         const row = el('li', undefined, 'item'), link = el(p.url ? 'a' : 'div', undefined, 'product');
-        if (p.url) link.href = p.url;
+        if (p.url) {
+          link.href = p.url;
+          link.addEventListener('click', event => {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            dialog.close();
+            // Reopening the current product only needs to dismiss the list.
+            if (link.href === location.href) { event.preventDefault(); return; }
+          });
+        }
         else { link.setAttribute('aria-disabled', 'true'); link.title = 'Open dit product eenmalig in Jumbo om de link te bewaren.'; }
         const photo = el('span', undefined, 'photo');
         const placeholder = () => photo.replaceChildren(el('span', undefined, 'placeholder'));

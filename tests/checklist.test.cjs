@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { JSDOM } = require('jsdom');
+const { JSDOM, VirtualConsole } = require('jsdom');
 const { productFromText, isProductPage } = require('../jumbo-checklist.user.js');
 const source = fs.readFileSync(require.resolve('../jumbo-checklist.user.js'), 'utf8');
 const url = 'https://product.jumbo.com/p/artikel/1f4a41b7-60ad-4cd0-b474-6c94dda7aab9';
@@ -30,8 +30,11 @@ test('also supports labelled article fields and tab-separated properties', () =>
   assert.deepEqual(p.eans, ['8712345678901']);
 });
 
-function setup(initial = {}) {
-  const dom = new JSDOM('<!doctype html><body><main id="product"></main></body>', { url, runScripts: 'outside-only', pretendToBeVisual: true });
+function setup(initial = {}, beforeEval = () => {}) {
+  const errors = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', error => errors.push(error));
+  const dom = new JSDOM('<!doctype html><body><main id="product"></main></body>', { url, runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole });
   const w = dom.window;
   // jsdom does not implement layout/innerText. Model the visible text separately
   // from the userscript's shadow UI; the product fixture is the only page content.
@@ -41,14 +44,108 @@ function setup(initial = {}) {
   w.HTMLDialogElement.prototype.close = function () { this.open = false; };
   w.confirm = () => true;
   for (const [key, value] of Object.entries(initial)) w.localStorage.setItem(key, value);
+  beforeEval(w);
   w.document.querySelector('main').textContent = fusilli;
   w.eval(source);
   const root = w.document.querySelector('#ov-vulcheck').shadowRoot;
   const checkbox = root.querySelector('.save-product input');
   const stored = () => JSON.parse(w.localStorage.getItem('ov.vulcheck.v1'));
   const tick = async () => { await new Promise(resolve => w.setTimeout(resolve, 200)); };
-  return { dom, w, root, checkbox, stored, tick };
+  return { dom, w, root, checkbox, stored, tick, errors };
 }
+
+function backFixture(w) {
+  const back = w.document.createElement('button');
+  back.className = 'btn mx-button mx-name-actionButton7 elevation-high btn-icon-only spacing-outer-left-sm btn-default';
+  back.dataset.buttonId = 'p.Producten.Article_Details.actionButton7';
+  back.innerHTML = '<span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span>';
+  w.document.querySelector('main').append(back);
+  return back;
+}
+
+// Control just the recovery timers; DOM observation and product detection stay real.
+function recoveryClock(w) {
+  const pending = new Map();
+  const originalSet = w.setTimeout.bind(w), originalClear = w.clearTimeout.bind(w);
+  let id = -1;
+  w.setTimeout = (fn, delay, ...args) => {
+    if (delay !== 2500 && delay !== 300) return originalSet(fn, delay, ...args);
+    pending.set(id, fn); return id--;
+  };
+  w.clearTimeout = timer => { pending.delete(timer); originalClear(timer); };
+  return () => { const callbacks = [...pending.values()]; pending.clear(); callbacks.forEach(fn => fn()); };
+}
+
+test('opening the current saved product closes the list without reloading', () => {
+  const { dom, root, checkbox, errors } = setup();
+  try {
+    checkbox.click(); root.querySelector('.launch').click();
+    root.querySelector('.product').click();
+    assert.equal(root.querySelector('dialog').open, false);
+    assert.equal(errors.length, 0);
+  } finally { dom.window.close(); }
+});
+
+test('stuck back recovers without a session marker while allowing the native icon click', () => {
+  const { dom, w, errors } = setup();
+  try {
+    const flush = recoveryClock(w), back = backFixture(w);
+    let nativeClicks = 0;
+    back.addEventListener('click', () => nativeClicks++);
+    back.firstChild.click();
+    assert.equal(nativeClicks, 1);
+    assert.equal(errors.length, 0);
+    flush();
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /navigation/);
+  } finally { dom.window.close(); }
+});
+
+test('successful native navigation, hidden/replaced pages and disabled buttons do not redirect', () => {
+  for (const state of ['route', 'removed', 'hidden', 'disabled', 'layout-hidden', 'other-button']) {
+    const { dom, w, errors } = setup();
+    try {
+      const flush = recoveryClock(w), back = backFixture(w);
+      if (state === 'disabled') back.dataset.disabled = 'true';
+      if (state === 'other-button') back.dataset.buttonId = 'unrelated';
+      back.click();
+      if (state === 'route') w.history.pushState({}, '', '/');
+      if (state === 'removed') back.remove();
+      if (state === 'hidden') back.hidden = true;
+      if (state === 'layout-hidden') back.getClientRects = () => [];
+      flush();
+      assert.equal(errors.length, 0, state);
+    } finally { dom.window.close(); }
+  }
+});
+
+test('observing the supplied close response recovers even without a captured click', () => {
+  for (const closed of [true, false]) {
+    const { dom, w, errors } = setup({}, w => {
+      // No actual network traffic: exercise the real XHR observation wrapper.
+      w.XMLHttpRequest.prototype.open = function () {};
+      w.XMLHttpRequest.prototype.send = function () {};
+    });
+    try {
+      const flush = recoveryClock(w);
+      backFixture(w);
+      const xhr = new w.XMLHttpRequest();
+      xhr.open('POST', '/xas/');
+      xhr.send(JSON.stringify({ action: 'runtimeOperation', params: { Article: { guid: '123' } } }));
+      Object.defineProperties(xhr, {
+        status: { value: 200 }, responseType: { value: 'json' },
+        response: { value: {
+          changes: { '123': { _PDPClosed: { value: closed } } },
+          instructions: [{ type: 'close', target: 'system', args: { NumberOfPagesToClose: 1 } }]
+        } }
+      });
+      xhr.dispatchEvent(new w.Event('load'));
+      flush();
+      assert.equal(errors.length, closed ? 1 : 0);
+      if (closed) assert.match(errors[0].message, /navigation/);
+    } finally { dom.window.close(); }
+  }
+});
 
 test('checkbox saves once, survives reload, and reflects checklist removal', async () => {
   const first = setup();
