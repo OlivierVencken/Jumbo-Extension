@@ -328,6 +328,57 @@ test('malformed FIFO storage is protected from overwrites', () => {
   try {
     root.querySelector('.fifo-button').click();
     assert.equal(root.querySelector('.fifo-table select').disabled, true);
+    assert.equal(root.querySelector('.print-fifo').disabled, true);
     assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
+  } finally { dom.window.close(); }
+});
+
+test('FIFO print exports both categories, current edits and blank slots safely without changing storage', () => {
+  const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
+  data.entries[0].product.name = '<img src=x onerror=alert(1)> Melk & yoghurt';
+  initial['ov.vulcheck.v1'] = JSON.stringify(data);
+  const preview = new JSDOM('', { url: 'https://product.jumbo.com/' });
+  let prints = 0;
+  preview.window.print = () => prints++;
+  preview.window.focus = () => {};
+  const { dom, w, root } = setup(initial, w => { w.open = () => preview.window; });
+  try {
+    assert.equal(root.querySelector('.print-fifo').hidden, true);
+    root.querySelector('.fifo-button').click();
+    assert.equal(root.querySelector('.print-fifo').hidden, false);
+    const controls = category => root.querySelector(`[data-category="${category}"] tbody tr`).querySelectorAll('select,input');
+    change(w, controls('zuivel')[0], '100000');
+    change(w, controls('zuivel')[1], 'yes');
+    change(w, controls('zuivel')[2], 'Anne <Sam> & Jo', 'input');
+    change(w, controls('vvp')[0], '100001');
+    change(w, controls('vvp')[1], 'no');
+    const before = w.localStorage.getItem('ov.vulcheck.v1');
+    root.querySelector('.print-fifo').click();
+    const doc = preview.window.document;
+    assert.equal(prints, 1);
+    assert.equal(doc.querySelectorAll('tbody tr').length, 5);
+    const cells = doc.querySelector('tbody tr').querySelectorAll('td');
+    assert.match(cells[0].textContent, /100000.*<img src=x onerror=alert\(1\)> Melk & yoghurt/s);
+    assert.equal(cells[1].textContent, '✓ Ja');
+    assert.equal(cells[2].textContent, 'Anne <Sam> & Jo');
+    assert.match(cells[3].textContent, /100001/);
+    assert.equal(cells[4].textContent, '✗ Nee');
+    assert.equal(doc.querySelector('tbody tr:nth-child(2) td').textContent, '');
+    assert.equal(doc.querySelectorAll('img,script,input,select').length, 0);
+    assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), before);
+    doc.getElementById('print').click(); assert.equal(prints, 2);
+    root.querySelector('.nav button').click();
+    assert.equal(root.querySelector('.print-fifo').hidden, true);
+  } finally { dom.window.close(); preview.window.close(); }
+});
+
+test('blocked print popups explain how to retry and an empty FIFO list can be printed', () => {
+  const { dom, root, errors } = setup({}, w => { w.open = () => null; });
+  try {
+    root.querySelector('.fifo-button').click();
+    assert.equal(root.querySelector('.print-fifo').disabled, false);
+    root.querySelector('.print-fifo').click();
+    assert.match(root.querySelector('.toast').textContent, /pop-ups/);
+    assert.equal(errors.length, 0);
   } finally { dom.window.close(); }
 });

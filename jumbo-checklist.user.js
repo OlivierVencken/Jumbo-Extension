@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.4.1
+// @version      0.5.1
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -324,6 +324,39 @@
     };
   }
 
+  // A standalone document avoids printing Jumbo's page or the scrollable dialog.
+  function fifoPrintDocument(entries, fifo, date = new Date()) {
+    const escape = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const products = new Map(entries.map(e => [e.product.article, e.product]));
+    const cells = row => {
+      const p = products.get(row.article);
+      if (!p) return '<td></td><td></td><td></td>';
+      return `<td><strong>${escape(p.article)}</strong><div>${escape(p.name)}</div>${p.size ? `<small>${escape(p.size)}</small>` : ''}</td>
+        <td class="answer">${row.fifo === null ? '' : row.fifo ? '✓ Ja' : '✗ Nee'}</td><td>${escape(row.names)}</td>`;
+    };
+    return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>FIFO controle lijst - ${day(date)}</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#eee;color:#111;font:10pt Arial,sans-serif}
+      .actions{padding:16px;text-align:center}.actions button{padding:12px 20px;font:inherit;font-weight:bold;cursor:pointer}.actions p{margin:8px 0}
+      main{width:277mm;margin:0 auto 20px;padding:10mm;background:white}h1{font-size:19pt;margin:0 0 4mm}
+      .meta{display:flex;gap:12mm;border:1.5pt solid #111;padding:3mm;margin-bottom:4mm}.controller{flex:1}
+      table{width:100%;table-layout:fixed;border-collapse:collapse}th,td{border:1pt solid #111;padding:2mm;text-align:left;overflow-wrap:anywhere;vertical-align:top}
+      thead th{background:#f1f1f1;vertical-align:middle;font-size:9pt}tbody th{font-size:10pt}tbody tr{height:15mm;break-inside:avoid}
+      td div{margin-top:1mm}small{font-size:9pt}.answer{white-space:nowrap;font-size:10pt}
+      .notes{margin-top:4mm;border:1.5pt solid #111;min-height:58mm;padding:3mm;break-inside:avoid}.notes h2{font-size:13pt;margin:0 0 3mm}
+      .notes p{font-size:9pt;line-height:1.4;margin:2mm 0}
+      /* Zero page margins suppress browser headers/footers; the sheet provides its own inset. */
+      @page{size:A4 landscape;margin:0}@media print{body{background:white}.actions{display:none}main{width:auto;margin:0;padding:10mm}thead{display:table-header-group}}
+      </style></head><body><div class="actions"><button type="button" id="print">Print / PDF</button><p>Kies een printer of bewaar als PDF via het afdrukmenu.</p></div><main>
+      <h1>Dagelijkse FIFO check!</h1><div class="meta"><span><strong>Datum:</strong> ${escape(date.toLocaleDateString('nl-NL'))}</span><span><strong>Dag:</strong> ${escape(date.toLocaleDateString('nl-NL', { weekday: 'long' }))}</span><span class="controller"><strong>Controleur:</strong> ________________________</span></div>
+      <table aria-label="FIFO controle Zuivel en VVP"><colgroup><col style="width:10%"><col style="width:25%"><col style="width:7%"><col style="width:13%"><col style="width:25%"><col style="width:7%"><col style="width:13%"></colgroup>
+      <thead><tr><th scope="col">Productgroep</th><th scope="col">Artikelnummer - zuivel</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th><th scope="col">Artikelnummer - VVP</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th></tr></thead>
+      <tbody>${Array.from({ length: 5 }, (_, i) => `<tr><th scope="row">Product ${i + 1}</th>${cells(fifo.zuivel[i])}${cells(fifo.vvp[i])}</tr>`).join('')}</tbody></table>
+      <section class="notes"><h2>Opmerkingen / Bijzonderheden</h2><p><strong>FIFO gevuld? Vinkje zetten. Niet FIFO gevuld? Kruisje zetten.</strong> Leeg = nog niet gecontroleerd.</p>
+      <p>Niet FIFO gevuld? Ga na wie het gevuld heeft. Niemand gevuld? Noteer alle vullers van deze koeling in het niet-FIFO-vullen-lijstje.</p></section>
+      </main></body></html>`;
+  }
+
   function mount() {
     const host = document.createElement('div');
     host.id = 'ov-vulcheck';
@@ -341,6 +374,7 @@
       dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction:column}
       .head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}h1{font-size:21px;margin:0;font-weight:700}
       .close,.remove{flex-shrink:0;display:grid;place-items:center;width:44px;height:44px;background:transparent;border-radius:4px;font-size:25px;font-weight:400}.close:hover,.remove:hover{background:#f4f4f4}
+      .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}.print-fifo{min-height:44px;padding:8px 10px;border-radius:4px;background:#ffcc00;font-size:14px;font-weight:700}.print-fifo:disabled{opacity:.5;cursor:default}
       .body{overflow:auto;overscroll-behavior:contain;flex:1;padding:0 16px calc(16px + env(safe-area-inset-bottom))}.list{list-style:none;margin:0;padding:0}
       .item{display:flex;align-items:center;border-bottom:1px solid #e9e9e9;min-height:88px}.product{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:14px 0;text-decoration:none;color:inherit}.product:hover .name{text-decoration:underline}.product[aria-disabled]{cursor:default}
       .photo{flex:0 0 56px;width:56px;height:56px;display:grid;place-items:center;border-radius:4px;background:#fafafa}.photo img{width:100%;height:100%;object-fit:contain}.placeholder{width:22px;height:28px;border:1.5px solid #b5b5b5;border-radius:3px;background:linear-gradient(#fafafa 35%,#ffcc00 35%,#ffcc00 65%,#fafafa 65%)}
@@ -377,7 +411,25 @@
     dialog.setAttribute('aria-labelledby', 'list-title');
     const title = el('h1', 'Mijn lijst'); title.id = 'list-title';
     const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', 'Sluiten');
-    head.append(title, close);
+    const printButton = button('Print / PDF', () => {
+      load(); render();
+      if (storageBroken) { notify('Je opgeslagen gegevens kunnen niet worden gelezen.'); return; }
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) { notify('Sta pop-ups toe om de FIFO-lijst te printen of als PDF te bewaren.'); return; }
+      try {
+        printWindow.opener = null;
+        printWindow.document.open();
+        printWindow.document.write(fifoPrintDocument(entries, fifo));
+        printWindow.document.close();
+        const print = () => { printWindow.focus(); printWindow.print(); };
+        printWindow.document.getElementById('print').addEventListener('click', print);
+        // Keep the preview open after printing/cancelling so Safari users can retry or share it.
+        print();
+      } catch (_) { notify('Afdrukken kon niet worden gestart. Probeer opnieuw via Print / PDF.'); }
+    }, 'print-fifo');
+    printButton.title = 'Print beide FIFO-tabellen of bewaar als PDF';
+    const headActions = el('div', undefined, 'head-actions');
+    headActions.append(printButton, close); head.append(title, headActions);
     const body = el('div', undefined, 'body'), list = el('ul', undefined, 'list');
     const nav = el('nav', undefined, 'nav'); nav.setAttribute('aria-label', 'Vulcheck pagina’s');
     const showView = next => { view = next; load(); render(); };
@@ -395,6 +447,7 @@
     function renderFifo() {
       title.textContent = view === 'fifo' ? 'Fifo check' : 'Mijn lijst';
       dialog.classList.toggle('fifo-view', view === 'fifo');
+      printButton.hidden = view !== 'fifo'; printButton.disabled = storageBroken;
       list.hidden = view !== 'list'; fifoPage.hidden = view !== 'fifo';
       listButton.setAttribute('aria-pressed', String(view === 'list'));
       fifoButton.setAttribute('aria-pressed', String(view === 'fifo'));

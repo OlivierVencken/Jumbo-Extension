@@ -14,6 +14,8 @@ Open **Mijn lijst → Fifo check** for the **Zuivel** and **VVP** tables. Each t
 
 FIFO selections, answers, and names save automatically on this device and remain until changed, including across days. Replacing a product clears that row's answer and names. Removing a product from Mijn lijst also clears its FIFO rows.
 
+On **Fifo check**, use **Print / PDF** in the top-right corner to open a print-ready sheet and the browser's print menu. Choose a printer or **Save as PDF** (on iPhone, use the print preview's sharing options to save the PDF to Files). Allow pop-ups if prompted. The landscape A4 sheet follows the existing FIFO control form: Zuivel and VVP side by side, five rows each, article numbers and product names, FIFO answers, names, today's date/day, and space to write the controller and notes. Unchecked answers and empty slots remain blank. The preview stays open after printing or cancelling, with a button to print again. Long entries wrap and may continue onto additional pages. Safari/iPhone printing still needs an on-device check.
+
 Product detection reads visible article details on `/p/artikel/…` pages, including the unlabelled article number above the name. This works without needing to capture the page's initial network response. The previous response decoder remains as a fallback. Product detection is based on the supplied screenshot; the authenticated Jumbo page and iPhone Safari still need an on-device check.
 
 Data is saved only in the browser on that device. Clearing Safari website data removes the saved list.
