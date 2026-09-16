@@ -65,7 +65,7 @@ test('checkbox saves once, survives reload, and reflects checklist removal', asy
     try {
       assert.equal(second.checkbox.checked, true);
       const launch = second.root.querySelector('.launch'); launch.click();
-      [...second.root.querySelectorAll('button')].find(b => b.textContent === 'Verwijderen').click();
+      second.root.querySelector('.remove').click();
       assert.equal(second.checkbox.checked, false);
       assert.equal(second.stored().entries.length, 0);
       second.checkbox.click();
@@ -118,4 +118,48 @@ test('storage failure never leaves a falsely checked checkbox', () => {
     assert.equal(checkbox.checked, false);
     assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
   } finally { dom.window.close(); }
+});
+
+
+test('minimal list saves exact links and product photos, with no visible checkbox label', async () => {
+  const { dom, w, root, checkbox, stored, tick } = setup();
+  try {
+    const image = w.document.createElement('img');
+    image.src = 'https://images.jumbo.com/fusilli.png'; image.alt = 'JUMBO FUSILLI';
+    w.document.querySelector('main').append(image);
+    await tick(); checkbox.click();
+    assert.equal(root.querySelector('.save-product').textContent, '');
+    assert.equal(stored().entries[0].product.url, url);
+    assert.equal(stored().entries[0].product.image, image.src);
+    assert.equal(root.querySelector('.product').href, url);
+    assert.equal(root.querySelector('.photo img').src, image.src);
+    assert.equal(root.querySelectorAll('select, textarea, details, footer, .capture').length, 0);
+    root.querySelector('.photo img').dispatchEvent(new w.Event('error'));
+    assert.ok(root.querySelector('.placeholder'));
+  } finally { dom.window.close(); }
+});
+
+test('older products stay visible across days, deduplicate, and acquire links on revisit', () => {
+  const p = productFromText(fusilli, [], url);
+  const entries = ['2026-01-01', '2026-01-02'].map(day => ({
+    id: day + ':' + p.article, day, product: p, done: true, note: 'Keep this note', added: day + 'T12:00:00Z'
+  }));
+  const { dom, root, checkbox, stored } = setup({ 'ov.vulcheck.v1': JSON.stringify({ version: 1, entries }) });
+  try {
+    assert.equal(root.querySelectorAll('.item').length, 1);
+    assert.equal(checkbox.checked, true);
+    assert.equal(root.querySelector('.product').href, url);
+    assert.equal(stored().entries[0].note, 'Keep this note');
+    checkbox.click();
+    assert.equal(stored().entries.length, 0);
+  } finally { dom.window.close(); }
+});
+
+test('stored links reject scripts and unrelated product destinations', () => {
+  const { parseProduct, parseBackup } = require('../jumbo-checklist.user.js');
+  const p = productFromText(fusilli, [], url);
+  assert.equal(parseProduct({ ...p, url: 'javascript:alert(1)', image: 'data:text/html,bad' }).url, undefined);
+  assert.equal(parseProduct({ ...p, url: 'https://example.com/p/artikel/123' }).url, undefined);
+  assert.equal(parseProduct({ ...p, image: 'javascript:alert(1)' }).image, undefined);
+  assert.equal(parseBackup({version: 1, entries: []}).length, 0);
 });

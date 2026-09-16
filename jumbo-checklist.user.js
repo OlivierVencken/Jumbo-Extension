@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.2.0
-// @description  Bewaar bekeken Jumbo-producten in een lokale dagelijkse checklist.
+// @version      0.3.0
+// @description  Bewaar Jumbo-producten in een eenvoudige lokale productlijst.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
 // @inject-into  page
@@ -30,8 +30,20 @@
     if (!p || typeof p !== 'object' || !/^\d{1,20}$/.test(p.article || '') ||
         typeof p.name !== 'string' || !p.name.trim() || !Array.isArray(p.eans)) throw Error('Ongeldig product');
     if (p.eans.length > 30 || p.eans.some(e => typeof e !== 'string' || !/^\d{8,14}$/.test(e))) throw Error('Ongeldige barcode');
-    return { article: p.article, name: str(p.name), size: str(p.size, 60), category: str(p.category, 100),
+    const product = { article: p.article, name: str(p.name), size: str(p.size, 60), category: str(p.category, 100),
       eans: [...new Set(p.eans)], pack: str(p.pack, 30) };
+    const url = safeUrl(p.url, true), image = safeUrl(p.image);
+    if (url) product.url = url;
+    if (image) product.image = image;
+    return product;
+  }
+  function safeUrl(value, product = false) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password) return '';
+      if (product && (url.origin !== 'https://product.jumbo.com' || !isProductPage(url.href))) return '';
+      return url.href;
+    } catch { return ''; }
   }
   function parseBackup(data) {
     if (!data || data.version !== VERSION || !Array.isArray(data.entries) || data.entries.length > 10000) {
@@ -104,7 +116,17 @@
     // runtime objects, which may belong to another product.
     const headings = [...doc.querySelectorAll('h1, h2, h3, [role="heading"], [itemprop="name"]')]
       .filter(visible).map(el => el.innerText || el.textContent || '');
-    return productFromText(doc.body?.innerText || '', headings, location.href);
+    const product = productFromText(doc.body?.innerText || '', headings, location.href);
+    if (!product) return null;
+    product.url = safeUrl(location.href, true);
+    const images = [...doc.querySelectorAll('main img, [role="main"] img, img')].filter(visible);
+    const photo = images.find(img => img.getAttribute('itemprop') === 'image' ||
+      (img.alt && img.alt.toLocaleLowerCase('nl').includes(product.name.toLocaleLowerCase('nl')))) ||
+      images.find(img => !/logo|icon|avatar|banner/i.test(`${img.alt} ${img.className} ${img.src}`) &&
+        (img.naturalWidth || img.width) >= 80 && (img.naturalHeight || img.height) >= 80);
+    const image = safeUrl(photo?.currentSrc || photo?.src);
+    if (image) product.image = image;
+    return product;
   }
   function createDecoder() {
     const cache = new Map();
@@ -256,162 +278,111 @@
     const root = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
     style.textContent = `
-      :host{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#182c29;font-size:16px;line-height:1.45;color-scheme:light}
-      *{box-sizing:border-box} button,input,textarea,select{font:inherit}button{cursor:pointer;touch-action:manipulation}
-      button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #a76a13;outline-offset:3px}
-      button{border:0;border-radius:12px;padding:12px 15px;min-height:44px;background:#e8ede8;color:#182c29;font-weight:650}
-      button:disabled{opacity:.5;cursor:default}.primary{background:#194f42;color:white}.quiet{background:transparent}.danger{color:#9a3434}
-      .launch{pointer-events:auto;margin:12px 12px calc(12px + env(safe-area-inset-bottom));box-shadow:0 4px 24px #0003;background:#194f42;color:white;border:1px solid #ffffff55;border-radius:30px}
-      [hidden]{display:none!important}.save-product{pointer-events:auto;position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));display:flex;align-items:center;gap:10px;max-width:calc(100vw - 24px);min-height:48px;padding:10px 14px;margin:0;background:#fff;color:#194f42;border:2px solid #194f42;border-radius:14px;box-shadow:0 4px 20px #0002;font-weight:650;cursor:pointer}.save-product input{width:24px;height:24px;min-width:24px;margin:0;padding:0;accent-color:#194f42}.save-product:has(input:checked){background:#e7efe4}
-      dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,460px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#f7f8f3;color:#182c29;box-shadow:-8px 0 50px #0002}
-      dialog::backdrop{background:#14292366}.shell{height:100%;display:flex;flex-direction:column}.head{padding:20px 20px 14px;border-bottom:1px solid #dce3da;background:#fff}
-      .row{display:flex;align-items:center;justify-content:space-between;gap:10px}.eyebrow{font-size:11px;letter-spacing:2px;font-weight:750;color:#65776e;text-transform:uppercase}h1{font-size:25px;margin:4px 0}h2{font-size:18px;margin:4px 0 8px}p{margin:6px 0}.sub{font-size:13px;color:#586b61}.body{overflow:auto;overscroll-behavior:contain;padding:16px 20px calc(24px + env(safe-area-inset-bottom));flex:1}
-      .capture{background:#e7efe4;border:1px solid #d4e1ce;border-radius:16px;padding:16px;margin-bottom:20px}.capture button{width:100%;margin-top:10px}
-      .controls{display:grid;gap:10px;margin-bottom:16px}select,input,textarea{width:100%;border:1px solid #c9d3c7;background:#fff;color:#182c29;border-radius:10px;padding:11px;font-size:16px}textarea{min-height:66px;resize:vertical}
-      .card{background:#fff;border:1px solid #dce3da;border-radius:14px;padding:14px;margin:10px 0}.card.done{background:#f0f3ed}.card.done h2{text-decoration:line-through;color:#627365}.check{flex:0 0 44px;width:44px;padding:8px;font-size:20px}.card h2{font-size:16px}.chips{font-size:12px;color:#586b61;margin:8px 0;overflow-wrap:anywhere}.empty{padding:25px 10px;text-align:center;color:#586b61}.empty strong{display:block;color:#182c29;font-size:18px;margin-bottom:8px}
-      details{margin-top:10px}summary{cursor:pointer;padding:8px 0;min-height:40px;font-size:13px}label{display:block;font-size:13px;margin-bottom:6px}footer{margin-top:24px;border-top:1px solid #dce3da;padding-top:16px}.backup{display:flex;gap:8px;flex-wrap:wrap}.toast{pointer-events:auto;position:fixed;bottom:calc(82px + env(safe-area-inset-bottom));right:14px;max-width:min(390px,calc(100vw - 28px));padding:14px 18px;background:#182c29;color:#fff;border-radius:12px;box-shadow:0 4px 24px #0003;font-size:14px}.status{font-size:12px;color:#586b61;margin-top:12px}.warning{color:#963d27}
+      :host{font-family:var(--list-font,Arial,sans-serif);color:#222;font-size:16px;line-height:1.4;color-scheme:light}
+      *{box-sizing:border-box}[hidden]{display:none!important}button,input{font:inherit}button,a,input{touch-action:manipulation}
+      button{cursor:pointer;color:inherit;border:0}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #222;outline-offset:3px}
+      .launch{pointer-events:auto;margin:16px 16px calc(16px + env(safe-area-inset-bottom));min-height:44px;padding:10px 18px;background:#ffcc00;border-radius:6px;font-weight:700;box-shadow:0 2px 10px #0002}
+      .save-product{pointer-events:auto;position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));width:44px;height:44px;display:grid;place-items:center;cursor:pointer}
+      .save-product input{width:26px;height:26px;margin:0;accent-color:#ffcc00;cursor:pointer;box-shadow:0 0 0 2px #fff;border-radius:3px}.save-product input:disabled{cursor:wait}
+      dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,400px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#fff;color:#222;box-shadow:-4px 0 24px #0002}
+      dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction:column}
+      .head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}h1{font-size:21px;margin:0;font-weight:700}
+      .close,.remove{flex-shrink:0;display:grid;place-items:center;width:44px;height:44px;background:transparent;border-radius:4px;font-size:25px;font-weight:400}.close:hover,.remove:hover{background:#f4f4f4}
+      .body{overflow:auto;overscroll-behavior:contain;flex:1;padding:0 16px calc(16px + env(safe-area-inset-bottom))}.list{list-style:none;margin:0;padding:0}
+      .item{display:flex;align-items:center;border-bottom:1px solid #e9e9e9;min-height:88px}.product{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:14px 0;text-decoration:none;color:inherit}.product:hover .name{text-decoration:underline}.product[aria-disabled]{cursor:default}
+      .photo{flex:0 0 56px;width:56px;height:56px;display:grid;place-items:center;border-radius:4px;background:#fafafa}.photo img{width:100%;height:100%;object-fit:contain}.placeholder{width:22px;height:28px;border:1.5px solid #b5b5b5;border-radius:3px;background:linear-gradient(#fafafa 35%,#ffcc00 35%,#ffcc00 65%,#fafafa 65%)}
+      .name{display:block;font-size:14px;font-weight:700;overflow-wrap:anywhere}.sub{display:block;font-size:13px;color:#707070;margin-top:3px}.remove{font-size:20px;color:#707070;margin-left:4px}.empty{padding:32px 0;color:#707070;font-size:14px}
+      .toast{pointer-events:auto;position:fixed;bottom:calc(76px + env(safe-area-inset-bottom));right:16px;max-width:min(360px,calc(100vw - 32px));padding:12px 16px;background:#222;color:#fff;border-radius:4px;font-size:14px;box-shadow:0 2px 12px #0002}
     `;
+    host.style.setProperty('--list-font', getComputedStyle(document.body).fontFamily || 'Arial, sans-serif');
     root.append(style);
     function el(tag, text, cls) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; }
     function button(text, action, cls) { const b = el('button', text, cls); b.type = 'button'; b.addEventListener('click', action); return b; }
-    const launch = button('Mijn vulcheck', () => { load(); render(); dialog.showModal(); }, 'launch');
-    const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input'), quickLabel = el('span');
-    quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product op de lijst van vandaag');
-    quickSave.append(quickCheck, quickLabel); quickSave.hidden = true;
+    const launch = button('Mijn lijst', () => { load(); render(); dialog.showModal(); }, 'launch');
+    const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
+    quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product');
+    quickSave.append(quickCheck); quickSave.hidden = true;
     let displayedArticle = null;
     quickCheck.addEventListener('change', () => {
       const checked = quickCheck.checked;
       refreshPage(); load();
       const product = activeProduct();
       if (!product || product.article !== displayedArticle) {
-        render(); notify('De productpagina is veranderd. Controleer het product en probeer opnieuw.'); return;
+        render(); notify('De productpagina is veranderd. Probeer opnieuw.'); return;
       }
-      if (checked) saveProduct(product);
-      else {
-        if (confirm(`${product.name} uit de lijst van vandaag verwijderen?`)) {
-          if (save(entries.filter(e => e.id !== `${day()}:${product.article}`))) notify('Product uit de lijst verwijderd.');
-        }
-        render();
-      }
+      if (checked) {
+        if (entries.length >= 10000) { notify('Je lijst is vol. Verwijder eerst een product.'); render(); return; }
+        save(addEntry(entries, { ...product, url: safeUrl(location.href, true) }));
+      } else save(entries.filter(e => e.product.article !== product.article));
+      render();
     });
-    const dialog = el('dialog'); dialog.setAttribute('aria-label', 'Mijn vulcheck');
-    const shell = el('div', undefined, 'shell'), head = el('header', undefined, 'head'), titleRow = el('div', undefined, 'row');
-    const titles = el('div'); titles.append(el('div', 'Jouw dienst, jouw lijst', 'eyebrow'), el('h1', 'Mijn vulcheck'));
-    titleRow.append(titles, button('Sluiten', () => dialog.close(), 'quiet'));
-    head.append(titleRow, el('p', 'Bewaar nu. Controleer straks.', 'sub'));
-    const body = el('div', undefined, 'body'), capture = el('section', undefined, 'capture');
-    const controls = el('div', undefined, 'controls'), dateSelect = el('select'), query = el('input');
-    dateSelect.setAttribute('aria-label', 'Welke dag'); query.type = 'search'; query.placeholder = 'Zoek naam, artikel of barcode'; query.setAttribute('aria-label', 'Zoek in je checklist');
-    let selectedDay = day(), openOnly = false;
-    const filter = button('Alle statussen', () => { openOnly = !openOnly; renderList(); });
-    filter.setAttribute('aria-pressed', 'false');
-    const count = el('p', '', 'sub'), list = el('div');
-    dateSelect.addEventListener('change', () => { selectedDay = dateSelect.value; renderList(); });
-    query.addEventListener('input', renderList);
-    controls.append(dateSelect, query, filter, count);
-    const footer = el('footer'), backups = el('div', undefined, 'backup'), status = el('p', '', 'status');
-    const file = el('input'); file.type = 'file'; file.accept = '.json,application/json'; file.hidden = true;
-    backups.append(button('Exporteer back-up', () => {
-      const blob = new Blob([JSON.stringify({ version: VERSION, entries }, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob), a = el('a'); a.href = url; a.download = `vulcheck-${day()}.json`; root.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-    }), button('Importeer', () => file.click()));
-    file.addEventListener('change', async () => {
-      const selected = file.files[0]; file.value = ''; if (!selected) return;
-      try {
-        if (selected.size > 10 * 1024 * 1024) throw Error('Back-up is te groot (maximaal 10 MB).');
-        const incoming = parseBackup(JSON.parse(await selected.text())); load();
-        const merged = mergeEntries(entries, incoming);
-        if (merged.length > 10000) throw Error('Te veel regels (maximaal 10.000).');
-        const added = merged.length - entries.length;
-        if (save(merged)) { render(); notify(`${added} regels toegevoegd. Bestaande regels zijn behouden.`); }
-      } catch (error) { notify(error instanceof SyntaxError ? 'Dit bestand is geen geldige JSON-back-up.' : error.message); }
-    });
-    footer.append(backups, file, el('p', 'Alleen opgeslagen in Safari op dit toestel. Maak regelmatig een back-up: wissen van websitegegevens verwijdert ook je lijst.', 'sub'),
-      el('p', 'Persoonlijk hulpmiddel · geen officiële Jumbo-functie · v0.2.0', 'sub'), status);
-    body.append(capture, controls, list, footer); shell.append(head, body); dialog.append(shell);
-    const toast = el('div', '', 'toast'); toast.hidden = true; toast.setAttribute('role', 'status'); toast.setAttribute('aria-live', 'polite');
+    const dialog = el('dialog'), shell = el('div', undefined, 'shell'), head = el('header', undefined, 'head');
+    dialog.setAttribute('aria-labelledby', 'list-title');
+    const title = el('h1', 'Mijn lijst'); title.id = 'list-title';
+    const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', 'Sluiten');
+    head.append(title, close);
+    const body = el('div', undefined, 'body'), list = el('ul', undefined, 'list');
+    body.append(list); shell.append(head, body); dialog.append(shell);
+    const toast = el('div', '', 'toast'); toast.hidden = true; toast.setAttribute('role', 'status');
     root.append(launch, quickSave, dialog, toast); document.body.append(host);
     let toastTimer;
     notify = message => { (dialog.open ? shell : root).append(toast); toast.textContent = message; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6500); };
-    function saveProduct(product) {
-      load();
-      if (entries.length >= 10000 && !entries.some(e => e.id === `${day()}:${product.article}`)) {
-        notify('Lijst is vol. Exporteer en verwijder oude regels.'); render(); return;
-      }
-      if (save(addEntry(entries, product))) { selectedDay = day(); notify(`${product.name} staat op vandaag.`); }
-      render();
-    }
-    function updateEntry(id, changes) { load(); if (save(entries.map(e => e.id === id ? { ...e, ...changes } : e))) render(); }
+    let listSignature = '';
     function renderList() {
-      filter.textContent = openOnly ? 'Alleen nog controleren' : 'Alle statussen'; filter.setAttribute('aria-pressed', String(openOnly));
-      const scope = entries.filter(e => selectedDay === 'all' || e.day === selectedDay);
-      count.textContent = `${scope.filter(e => !e.done).length} nog controleren · ${scope.filter(e => e.done).length} klaar`;
-      const term = query.value.trim().toLocaleLowerCase('nl');
-      const shown = scope.filter(e => (!openOnly || !e.done) && [e.product.name, e.product.article, ...e.product.eans, e.note].join(' ').toLocaleLowerCase('nl').includes(term))
-        .sort((a, b) => Number(a.done) - Number(b.done) || b.day.localeCompare(a.day) || b.added.localeCompare(a.added));
-      list.replaceChildren();
-      if (!shown.length) {
-        const empty = el('div', undefined, 'empty'); empty.append(el('strong', scope.length ? 'Niets in deze weergave' : 'Je lijst is nog leeg'),
-          el('p', scope.length ? 'Pas je zoekopdracht of filter aan.' : 'Open een product in Jumbo en vink rechtsboven Bewaar voor vandaag aan.'));
-        list.append(empty);
+      const unique = new Map();
+      for (const entry of [...entries].sort((a, b) => b.added.localeCompare(a.added))) {
+        if (!unique.has(entry.product.article)) unique.set(entry.product.article, { ...entry.product });
+        else {
+          const p = unique.get(entry.product.article);
+          p.url ||= entry.product.url; p.image ||= entry.product.image;
+        }
       }
-      for (const entry of shown) {
-        const p = entry.product, card = el('article', undefined, `card${entry.done ? ' done' : ''}`), row = el('div', undefined, 'row');
-        const check = button(entry.done ? '✓' : '○', () => updateEntry(entry.id, { done: !entry.done }), 'check');
-        check.setAttribute('aria-label', `${entry.done ? 'Markeer als nog controleren' : 'Markeer als gecontroleerd'}: ${p.name}`); check.setAttribute('aria-pressed', String(entry.done));
-        const text = el('div'); text.style.flex = '1'; text.append(el('h2', p.name), el('p', [p.size, p.category].filter(Boolean).join(' · '), 'sub'));
-        row.append(text, check); card.append(row, el('p', `Artikel ${p.article}${selectedDay === 'all' ? ` · ${entry.day}` : ''}`, 'chips'));
-        if (entry.note) card.append(el('p', entry.note, 'sub'));
-        const details = el('details'); details.append(el('summary', 'Barcodes, notitie en opties'));
-        details.append(el('p', p.eans.join(' · ') || 'Geen barcode ontvangen', 'chips'));
-        if (p.pack) details.append(el('p', `Collo-inhoud: ${p.pack}`, 'sub'));
-        const label = el('label', 'Notitie'), note = el('textarea'); note.maxLength = 1000; note.value = entry.note; note.placeholder = 'Bijvoorbeeld: tweede kar, bovenste vak'; label.append(note); details.append(label);
-        note.addEventListener('change', () => { load(); if (save(entries.map(e => e.id === entry.id ? { ...e, note: note.value } : e))) notify('Notitie opgeslagen.'); });
-        if (entry.day !== day()) details.append(button('Ook op vandaag zetten', () => {
-          load(); const next = addEntry(entries, p); if (save(next)) { selectedDay = day(); render(); notify('Product staat op vandaag.'); }
-        }));
-        details.append(button('Verwijderen', () => {
-          if (confirm(`${p.name} uit de lijst van ${entry.day} verwijderen?`)) { load(); if (save(entries.filter(e => e.id !== entry.id))) render(); }
-        }, 'quiet danger'));
-        card.append(details); list.append(card);
+      launch.textContent = unique.size ? 'Mijn lijst · ' + unique.size : 'Mijn lijst';
+      const signature = JSON.stringify([storageBroken, [...unique.values()]]);
+      if (signature === listSignature) return;
+      listSignature = signature;
+      list.replaceChildren();
+      if (!unique.size) list.append(el('li', storageBroken ? 'Je opgeslagen lijst kan niet worden gelezen.' : 'Je lijst is nog leeg.', 'empty'));
+      for (const p of unique.values()) {
+        const row = el('li', undefined, 'item'), link = el(p.url ? 'a' : 'div', undefined, 'product');
+        if (p.url) link.href = p.url;
+        else { link.setAttribute('aria-disabled', 'true'); link.title = 'Open dit product eenmalig in Jumbo om de link te bewaren.'; }
+        const photo = el('span', undefined, 'photo');
+        const placeholder = () => photo.replaceChildren(el('span', undefined, 'placeholder'));
+        photo.setAttribute('aria-hidden', 'true');
+        if (p.image) {
+          const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+          img.addEventListener('error', placeholder, { once: true }); img.src = p.image; photo.append(img);
+        } else placeholder();
+        const text = el('span'); text.append(el('span', p.name, 'name'));
+        if (p.size) text.append(el('span', p.size, 'sub'));
+        if (!p.url) text.append(el('span', 'Open opnieuw in Jumbo om te koppelen', 'sub'));
+        link.append(photo, text);
+        const remove = button('×', () => {
+          load(); if (save(entries.filter(e => e.product.article !== p.article))) { render(); (list.querySelector('.remove') || close).focus(); }
+        }, 'remove');
+        remove.setAttribute('aria-label', 'Verwijderen: ' + p.name); remove.title = 'Verwijderen';
+        row.append(link, remove); list.append(row);
       }
     }
     render = () => {
       refreshPage();
-      const today = day();
       const product = activeProduct();
-      const exists = product && entries.some(e => e.id === `${today}:${product.article}`);
-      displayedArticle = product?.article || null;
-      quickSave.hidden = !product && !/\/artikel\//i.test(location.pathname + location.hash);
-      quickCheck.checked = Boolean(exists);
-      quickCheck.disabled = !product || storageBroken;
-      quickLabel.textContent = !product ? 'Product laden…' : exists ? 'Op je lijst vandaag' : 'Bewaar voor vandaag';
-      quickSave.title = product ? `${product.name} · Artikel ${product.article}` : 'Wacht tot de productgegevens zichtbaar zijn.';
-      launch.textContent = `Mijn vulcheck · ${entries.filter(e => e.day === today && !e.done).length}`;
-      capture.replaceChildren(el('div', 'Huidig product', 'eyebrow'));
-      if (product) {
-        capture.append(el('h2', product.name), el('p', `${product.size} · Artikel ${product.article}`, 'sub'));
-        const add = button(exists ? 'Staat al op vandaag ✓' : 'Bewaar voor vandaag', () => {
-          refreshPage();
-          const latest = activeProduct();
-          if (!latest || latest.article !== product.article) { render(); notify('Open het product opnieuw.'); return; }
-          saveProduct(latest);
-        }, 'primary'); add.disabled = exists || storageBroken; capture.append(add);
-      } else {
-        capture.append(el('h2', 'Open eerst een product'), el('p', 'Scan of zoek in Jumbo en open de productdetails. Vink rechtsboven Bewaar voor vandaag aan om het product op je lijst te zetten.', 'sub'));
+      // Enrich legacy entries when their product is revisited, retaining notes and dates.
+      if (product && !storageBroken) {
+        const url = safeUrl(location.href, true);
+        const needsUpdate = entries.some(e => e.product.article === product.article &&
+          ((url && e.product.url !== url) || (product.image && e.product.image !== product.image)));
+        if (needsUpdate) save(entries.map(e => e.product.article === product.article ?
+          { ...e, product: { ...e.product, ...(url ? { url } : {}), ...(product.image ? { image: product.image } : {}) } } : e));
       }
-      const dates = [...new Set([today, ...entries.map(e => e.day)])].sort().reverse();
-      if (selectedDay !== 'all' && !dates.includes(selectedDay)) selectedDay = today;
-      dateSelect.replaceChildren();
-      for (const d of dates) { const option = el('option', d === today ? `Vandaag · ${d}` : d); option.value = d; dateSelect.append(option); }
-      const all = el('option', 'Alle dagen · ook onafgeronde producten'); all.value = 'all'; dateSelect.append(all); dateSelect.value = selectedDay;
-      status.textContent = storageBroken ? 'Opslag niet leesbaar; bewaren is geblokkeerd om je gegevens te beschermen.' :
-        pageProduct && product ? 'Product herkend op de pagina.' :
-        isProductPage(location.href) && !product ? 'Product nog niet herkend. Wacht tot de naam en het artikelnummer zichtbaar zijn. Blijft dit staan? Deel een schermafbeelding van de productpagina.' :
-        requestsSeen ? `Verbinding gezien · ${requestsSeen} app-antwoorden gelezen` : 'Nog geen app-antwoorden gezien. Ververs Jumbo na installatie en zoek een product.';
-      status.className = storageBroken ? 'status warning' : 'status';
-      // Leave an in-progress note intact when unrelated background responses arrive.
-      if (root.activeElement?.tagName !== 'TEXTAREA') renderList();
+      const exists = product && entries.some(e => e.product.article === product.article);
+      displayedArticle = product?.article || null;
+      quickSave.hidden = !isProductPage(location.href);
+      quickCheck.checked = Boolean(exists); quickCheck.disabled = !product || storageBroken;
+      quickCheck.setAttribute('aria-label', exists ? 'Verwijder dit product uit mijn lijst' : 'Bewaar dit product');
+      quickSave.title = product ? product.name + (exists ? ' · Op mijn lijst' : ' · Bewaren') : 'Product laden…';
+      renderList();
     };
     window.addEventListener('storage', e => { if (e.key === KEY || e.key === null) { load(); render(); } });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { load(); render(); } });
