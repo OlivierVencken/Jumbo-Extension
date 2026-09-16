@@ -388,15 +388,15 @@
       .save-product input{width:26px;height:26px;margin:0;accent-color:#ffcc00;cursor:pointer;box-shadow:0 0 0 2px #fff;border-radius:3px}.save-product input:disabled{cursor:wait}
       dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,400px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#fff;color:#222;box-shadow:-4px 0 24px #0002}
       dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction:column}
-      .head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}h1{font-size:21px;margin:0;font-weight:700}
+      .head{display:flex;flex-shrink:0;align-items:center;justify-content:space-between;gap:8px;padding:12px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}
       .close,.remove{flex-shrink:0;display:grid;place-items:center;width:44px;height:44px;background:transparent;border-radius:4px;font-size:25px;font-weight:400}.close:hover,.remove:hover{background:#f4f4f4}
-      .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}.print-fifo{min-height:44px;padding:8px 10px;border-radius:4px;background:#ffcc00;font-size:14px;font-weight:700}.print-fifo:disabled{opacity:.5;cursor:default}
+      .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}.head-icon{display:grid;place-items:center;width:44px;height:44px;padding:10px;border-radius:4px;background:transparent}.head-icon:hover{background:#f4f4f4}.head-icon:disabled{opacity:.5;cursor:default}
       .body{overflow:auto;overscroll-behavior:contain;flex:1;padding:0 16px calc(16px + env(safe-area-inset-bottom))}.list{list-style:none;margin:0;padding:0}
       .item{display:flex;align-items:center;border-bottom:1px solid #e9e9e9;min-height:88px}.product{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:14px 0;text-decoration:none;color:inherit}.product:hover .name{text-decoration:underline}.product[aria-disabled]{cursor:default}
       .photo{flex:0 0 56px;width:56px;height:56px;display:grid;place-items:center;border-radius:4px;background:#fafafa}.photo img{width:100%;height:100%;object-fit:contain}.placeholder{width:22px;height:28px;border:1.5px solid #b5b5b5;border-radius:3px;background:linear-gradient(#fafafa 35%,#ffcc00 35%,#ffcc00 65%,#fafafa 65%)}
       .name{display:block;font-size:14px;font-weight:700;overflow-wrap:anywhere}.sub{display:block;font-size:13px;color:#707070;margin-top:3px}.remove{font-size:20px;color:#707070;margin-left:4px}.empty{padding:32px 0;color:#707070;font-size:14px}
       .toast{pointer-events:auto;position:fixed;bottom:calc(76px + env(safe-area-inset-bottom));right:16px;max-width:min(360px,calc(100vw - 32px));padding:12px 16px;background:#222;color:#fff;border-radius:4px;font-size:14px;box-shadow:0 2px 12px #0002}
-      .nav{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid #eee}.nav button{padding:10px 12px;min-height:44px;border-radius:4px;background:#f2f2f2}.nav button[aria-pressed="true"]{background:#ffcc00;font-weight:700}
+      .nav{display:flex;gap:4px;min-width:0}.nav button{padding:10px 8px;min-height:44px;border-radius:4px;background:#f2f2f2;font-size:14px;white-space:nowrap}.nav button[aria-pressed="true"]{background:#ffcc00;font-weight:700}
       dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px}.fifo-table th{text-align:left;padding:8px 4px;border-bottom:2px solid #ffcc00}.fifo-table th:first-child{width:43%}.fifo-table th:nth-child(2){width:25%}.fifo-table td{padding:10px 4px;border-bottom:1px solid #e9e9e9;vertical-align:top}
       .fifo-table select,.fifo-table input{display:block;box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;max-height:44px;margin:0;padding:6px;border:1px solid #aaa;border-radius:4px;background:#fff;color:#222;font:inherit;font-size:16px;line-height:normal}.fifo-table select:focus-visible{outline:3px solid #222;outline-offset:2px}.fifo-table :disabled{opacity:.5}.fifo-help{font-size:14px;color:#666}
     `;
@@ -404,6 +404,13 @@
     root.append(style);
     function el(tag, text, cls) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; }
     function button(text, action, cls) { const b = el('button', text, cls); b.type = 'button'; b.addEventListener('click', action); return b; }
+    function setIcon(control, label, path) {
+      control.setAttribute('aria-label', label); control.title = label;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', width: '24', height: '24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(name, value);
+      const shape = document.createElementNS(svg.namespaceURI, 'path'); shape.setAttribute('d', path);
+      svg.append(shape); control.replaceChildren(svg);
+    }
     let view = 'list';
     const launch = button('Mijn lijst', () => { view = 'list'; load(); render(); dialog.showModal(); }, 'launch');
     const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
@@ -424,10 +431,8 @@
       render();
     });
     const dialog = el('dialog'), shell = el('div', undefined, 'shell'), head = el('header', undefined, 'head');
-    dialog.setAttribute('aria-labelledby', 'list-title');
-    const title = el('h1', 'Mijn lijst'); title.id = 'list-title';
     const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', 'Sluiten');
-    const printButton = button('Print / PDF', () => {
+    const printButton = button('', () => {
       load(); render();
       if (storageBroken) { notify('Je opgeslagen gegevens kunnen niet worden gelezen.'); return; }
       const printWindow = window.open('', '_blank');
@@ -442,18 +447,25 @@
         // Keep the preview open after printing/cancelling so Safari users can retry or share it.
         print();
       } catch (_) { notify('Afdrukken kon niet worden gestart. Probeer opnieuw via Print / PDF.'); }
-    }, 'print-fifo');
-    printButton.title = 'Print beide FIFO-tabellen of bewaar als PDF';
+    }, 'head-icon print-fifo');
+    setIcon(printButton, 'Print beide FIFO-tabellen of bewaar als PDF', 'M6 9V3h12v6 M6 18H3V9h18v9h-3 M6 14h12v7H6z M17 12h1');
+    const clearButton = button('', () => {
+      load();
+      if (save([])) { render(); close.focus(); notify('Je lijst is leeggemaakt.'); }
+      else render();
+    }, 'head-icon clear-list');
+    setIcon(clearButton, 'Lijst leegmaken', 'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7');
     const headActions = el('div', undefined, 'head-actions');
-    headActions.append(printButton, close); head.append(title, headActions);
+    headActions.append(printButton, clearButton, close);
     const body = el('div', undefined, 'body'), list = el('ul', undefined, 'list');
     const nav = el('nav', undefined, 'nav'); nav.setAttribute('aria-label', 'Vulcheck pagina’s');
     const showView = next => { view = next; load(); render(); };
     const listButton = button('Mijn lijst', () => showView('list'));
     const fifoButton = button('Fifo check', () => showView('fifo'), 'fifo-button');
     nav.append(listButton, fifoButton);
+    head.append(nav, headActions);
     const fifoPage = el('div', undefined, 'fifo-page');
-    body.append(list, fifoPage); shell.append(head, nav, body); dialog.append(shell);
+    body.append(list, fifoPage); shell.append(head, body); dialog.append(shell);
     const toast = el('div', '', 'toast'); toast.hidden = true; toast.setAttribute('role', 'status');
     root.append(launch, quickSave, dialog, toast); document.body.append(host);
     let toastTimer;
@@ -461,9 +473,10 @@
     let listSignature = '';
     let fifoSignature = '';
     function renderFifo() {
-      title.textContent = view === 'fifo' ? 'Fifo check' : 'Mijn lijst';
+      dialog.setAttribute('aria-label', view === 'fifo' ? 'Fifo check' : 'Mijn lijst');
       dialog.classList.toggle('fifo-view', view === 'fifo');
       printButton.hidden = view !== 'fifo'; printButton.disabled = storageBroken;
+      clearButton.hidden = view !== 'list'; clearButton.disabled = storageBroken || !entries.length;
       list.hidden = view !== 'list'; fifoPage.hidden = view !== 'fifo';
       listButton.setAttribute('aria-pressed', String(view === 'list'));
       fifoButton.setAttribute('aria-pressed', String(view === 'fifo'));

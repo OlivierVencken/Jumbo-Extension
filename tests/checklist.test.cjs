@@ -367,6 +367,46 @@ test('removing a saved product clears its FIFO row and failed writes restore the
   } finally { dom.window.close(); }
 });
 
+test('clearing the list persists an empty list and clears its FIFO selections', () => {
+  const { dom, w, root, checkbox, stored } = setup(fifoFixture());
+  try {
+    checkbox.click(); root.querySelector('.launch').click();
+    const clear = root.querySelector('.clear-list');
+    assert.equal(clear.hidden, false);
+    assert.equal(clear.disabled, false);
+    root.querySelector('.fifo-button').click();
+    assert.equal(clear.hidden, true);
+    change(w, root.querySelector('.fifo-table select'), '100000');
+    change(w, root.querySelectorAll('.fifo-table select')[1], 'yes');
+    root.querySelector('.nav button').click();
+    clear.click();
+    assert.deepEqual(stored().entries, []);
+    for (const row of Object.values(stored().fifo).flat()) {
+      assert.deepEqual(row, { article: '', fifo: null, names: '' });
+    }
+    assert.equal(checkbox.checked, false);
+    assert.equal(root.querySelectorAll('.item').length, 0);
+    assert.equal(clear.disabled, true);
+    assert.equal(root.activeElement, root.querySelector('.close'));
+    const reloaded = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
+    try { assert.equal(reloaded.root.querySelectorAll('.item').length, 0); }
+    finally { reloaded.dom.window.close(); }
+  } finally { dom.window.close(); }
+});
+
+test('failed clear preserves saved products and reports the failure', () => {
+  const initial = fifoFixture();
+  const { dom, w, root } = setup(initial);
+  try {
+    root.querySelector('.launch').click();
+    w.Storage.prototype.setItem = () => { throw Error('QuotaExceededError'); };
+    root.querySelector('.clear-list').click();
+    assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
+    assert.equal(root.querySelectorAll('.item').length, 6);
+    assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
+  } finally { dom.window.close(); }
+});
+
 test('malformed FIFO storage is protected from overwrites', () => {
   const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
   data.fifo = { zuivel: Array(6).fill({ article: '', fifo: null, names: '' }), vvp: [] };
@@ -376,6 +416,7 @@ test('malformed FIFO storage is protected from overwrites', () => {
     root.querySelector('.fifo-button').click();
     assert.equal(root.querySelector('.fifo-table select').disabled, true);
     assert.equal(root.querySelector('.print-fifo').disabled, true);
+    assert.equal(root.querySelector('.clear-list').disabled, true);
     assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
   } finally { dom.window.close(); }
 });
