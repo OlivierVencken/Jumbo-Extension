@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.5.3
+// @version      0.5.5
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -352,25 +352,145 @@
     };
     return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
       <title>FIFO controle lijst - ${day(date)}</title><style>
-      *{box-sizing:border-box}body{margin:0;background:#eee;color:#111;font:10pt Arial,sans-serif}
+      *{box-sizing:border-box}html{-webkit-text-size-adjust:none;text-size-adjust:none}body{margin:0;background:#eee;color:#111;font:10pt/1.2 Arial,sans-serif}
       .actions{padding:16px;text-align:center}.actions button{padding:12px 20px;font:inherit;font-weight:bold;cursor:pointer}.actions p{margin:8px 0}
-      main{width:277mm;margin:0 auto 20px;padding:10mm;background:white}h1{font-size:19pt;margin:0 0 4mm}
+      .sheet{position:relative;width:100%;max-width:277mm;aspect-ratio:277/190;margin:0 auto 20px;background:white;overflow:hidden}
+      main{position:absolute;top:0;left:0;width:277mm;padding:10mm;background:white;transform-origin:top left}h1{font-size:19pt;margin:0 0 4mm}
       .meta{display:flex;gap:12mm;border:1.5pt solid #111;padding:3mm;margin-bottom:4mm}.controller{flex:1}
       table{width:100%;table-layout:fixed;border-collapse:collapse}th,td{border:1pt solid #111;padding:2mm;text-align:left;overflow-wrap:anywhere;vertical-align:top}
       thead th{background:#f1f1f1;vertical-align:middle;font-size:9pt}tbody th{font-size:10pt}tbody tr{height:15mm;break-inside:avoid}
       td div{margin-top:1mm}small{font-size:9pt}.answer{white-space:nowrap;font-size:10pt}
       .notes{margin-top:4mm;border:1.5pt solid #111;min-height:58mm;padding:3mm;break-inside:avoid}.notes h2{font-size:13pt;margin:0 0 3mm}
       .notes p{font-size:9pt;line-height:1.4;margin:2mm 0}
-      /* Zero page margins suppress browser headers/footers; the sheet provides its own inset. */
-      @page{size:A4 landscape;margin:0}@media print{body{background:white}.actions{display:none}main{width:auto;margin:0;padding:10mm}thead{display:table-header-group}}
-      </style></head><body><div class="actions"><button type="button" id="print">Print / PDF</button><p>Kies een printer of bewaar als PDF via het afdrukmenu.</p></div><main>
+      /* Best-effort layout for manual webpage printing; use Open PDF for a clean export. */
+      @page{size:A4 landscape;margin:0}@media print{body{background:white}.actions{display:none}.sheet{height:190mm;aspect-ratio:auto;margin:0 auto;break-inside:avoid;page-break-inside:avoid}thead{display:table-header-group}}
+      </style></head><body><div class="actions"><button type="button" id="print">Open PDF</button> <a id="download" hidden>Download PDF</a><p id="pdf-status" role="status">Open de PDF en kies delen, bewaren of afdrukken.</p></div><div class="sheet"><main>
       <h1>Dagelijkse FIFO check!</h1><div class="meta"><span><strong>Datum:</strong> ${escape(date.toLocaleDateString('nl-NL'))}</span><span><strong>Dag:</strong> ${escape(date.toLocaleDateString('nl-NL', { weekday: 'long' }))}</span><span class="controller"><strong>Controleur:</strong> ${controller ? escape(controller) : '________________________'}</span></div>
       <table aria-label="FIFO controle Zuivel en VVP"><colgroup><col style="width:10%"><col style="width:25%"><col style="width:7%"><col style="width:13%"><col style="width:25%"><col style="width:7%"><col style="width:13%"></colgroup>
       <thead><tr><th scope="col">Productgroep</th><th scope="col">Artikelnummer - zuivel</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th><th scope="col">Artikelnummer - VVP</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th></tr></thead>
       <tbody>${Array.from({ length: 5 }, (_, i) => `<tr><th scope="row">Product ${i + 1}</th>${cells(fifo.zuivel[i])}${cells(fifo.vvp[i])}</tr>`).join('')}</tbody></table>
       <section class="notes"><h2>Opmerkingen / Bijzonderheden</h2><p><strong>FIFO gevuld? Vinkje zetten. Niet FIFO gevuld? Kruisje zetten.</strong> Leeg = nog niet gecontroleerd.</p>
       <p>Niet FIFO gevuld? Ga na wie het gevuld heeft. Niemand gevuld? Noteer alle vullers van deze koeling in het niet-FIFO-vullen-lijstje.</p></section>
-      </main></body></html>`;
+      </main></div></body></html>`;
+  }
+
+  function fitFifoSheet(doc) {
+    const sheet = doc.querySelector('.sheet'), content = sheet.querySelector('main');
+    // Measure untransformed content, including long names, and shrink the entire form.
+    // Absolute positioning keeps its original height out of the pagination flow.
+    const width = content.offsetWidth, height = content.scrollHeight;
+    if (!width || !height || !sheet.clientWidth || !sheet.clientHeight) return;
+    const scale = Math.min(1, sheet.clientWidth / width, sheet.clientHeight / height);
+    content.style.transform = `scale(${scale})`;
+  }
+
+  // Draw locally with the browser's fonts so accents and FIFO symbols survive export.
+  // A single image-backed PDF page avoids Safari's HTML pagination and added footers.
+  function fifoPdf(doc) {
+    const canvas = doc.createElement('canvas');
+    const pageWidth = 841.89, pageHeight = 595.28, inset = 28.35, width = pageWidth - 2 * inset;
+    canvas.width = Math.ceil(pageWidth * 3); canvas.height = Math.ceil(pageHeight * 3);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas unavailable');
+    const font = (size, bold) => { ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, sans-serif`; };
+    const wrap = (text, maxWidth, size, bold = false) => {
+      font(size, bold);
+      const lines = [];
+      let line = '';
+      for (const word of text.trim().split(/\s+/)) {
+        if (line && ctx.measureText(`${line} ${word}`).width <= maxWidth) { line += ` ${word}`; continue; }
+        if (line) lines.push(line);
+        line = '';
+        for (const char of word) {
+          if (line && ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = ''; }
+          line += char;
+        }
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    const textBlock = (text, maxWidth, size, bold = false) => {
+      const lines = wrap(text, maxWidth, size, bold);
+      return { lines, size, bold, height: lines.length * size * 1.25 };
+    };
+    const drawText = (block, x, y) => {
+      font(block.size, block.bold); ctx.fillStyle = '#111';
+      block.lines.forEach((line, i) => ctx.fillText(line, x, y + i * block.size * 1.25));
+    };
+    const box = (x, y, w, h, shaded = false) => {
+      if (shaded) { ctx.fillStyle = '#f1f1f1'; ctx.fillRect(x, y, w, h); }
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 0.8; ctx.strokeRect(x, y, w, h);
+    };
+    const title = textBlock(doc.querySelector('h1').textContent, width, 19, true);
+    const meta = [...doc.querySelectorAll('.meta span')].map(el => textBlock(el.textContent, width / 3 - 18, 10));
+    const metaHeight = Math.max(...meta.map(block => block.height)) + 16;
+    const columns = [10, 25, 7, 13, 25, 7, 13].map(percent => width * percent / 100);
+    const rows = [...doc.querySelectorAll('table tr')].map((row, index) => {
+      const cells = [...row.children].map((cell, column) => {
+        // Keep article, product name and size on separate lines as in the preview.
+        const marker = cell.classList.contains('answer') ? cell.textContent.trim()[0] : '';
+        const marked = marker === '✓' || marker === '✗';
+        const parts = [...cell.childNodes].map(node => node.textContent.trim()).filter(Boolean);
+        const blocks = parts.map(text => textBlock(marked ? text.slice(1).trim() : text, columns[column] - 10 - (marked ? 12 : 0), index === 0 ? 9 : 10, cell.tagName === 'TH'));
+        return { blocks, marker: marked ? marker : '', height: blocks.reduce((sum, block) => sum + block.height, 0) };
+      });
+      return { cells, height: Math.max(index === 0 ? 28 : 42.5, ...cells.map(cell => cell.height + 12)) };
+    });
+    const notesTitle = textBlock(doc.querySelector('.notes h2').textContent, width - 18, 13, true);
+    const notes = [...doc.querySelectorAll('.notes p')].map(el => textBlock(el.textContent, width - 18, 9));
+    const notesHeight = Math.max(164, 18 + notesTitle.height + notes.reduce((sum, block) => sum + block.height + 6, 0));
+    const contentHeight = title.height + 12 + metaHeight + 12 + rows.reduce((sum, row) => sum + row.height, 0) + 12 + notesHeight;
+    const scale = Math.min(1, (pageHeight - 2 * inset) / contentHeight);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(3, 3);
+    ctx.translate(inset + width * (1 - scale) / 2, inset);
+    ctx.scale(scale, scale); ctx.textBaseline = 'top';
+    let y = 0;
+    drawText(title, 0, y); y += title.height + 12;
+    box(0, y, width, metaHeight);
+    meta.forEach((block, i) => drawText(block, i * width / 3 + 8, y + 8));
+    y += metaHeight + 12;
+    rows.forEach((row, index) => {
+      let x = 0;
+      row.cells.forEach((cell, column) => {
+        box(x, y, columns[column], row.height, index === 0);
+        let textY = y + 6;
+        if (cell.marker) {
+          // Draw check/cross explicitly; not every platform font contains these glyphs.
+          ctx.beginPath(); ctx.lineWidth = 1.2;
+          if (cell.marker === '✓') { ctx.moveTo(x + 5, y + 11); ctx.lineTo(x + 8, y + 14); ctx.lineTo(x + 13, y + 7); }
+          else { ctx.moveTo(x + 5, y + 7); ctx.lineTo(x + 12, y + 14); ctx.moveTo(x + 12, y + 7); ctx.lineTo(x + 5, y + 14); }
+          ctx.stroke();
+        }
+        cell.blocks.forEach(block => { drawText(block, x + 5 + (cell.marker ? 12 : 0), textY); textY += block.height; });
+        x += columns[column];
+      });
+      y += row.height;
+    });
+    y += 12; box(0, y, width, notesHeight); y += 9;
+    drawText(notesTitle, 9, y); y += notesTitle.height + 6;
+    notes.forEach(block => { drawText(block, 9, y); y += block.height + 6; });
+    const jpeg = Uint8Array.from(atob(canvas.toDataURL('image/jpeg', 0.95).split(',')[1]), char => char.charCodeAt(0));
+    const ascii = text => Uint8Array.from(text, char => char.charCodeAt(0));
+    const chunks = [], offsets = [0];
+    let length = 0;
+    const append = data => { chunks.push(data); length += data.length; };
+    const object = (number, body, stream) => {
+      offsets[number] = length;
+      append(ascii(`${number} 0 obj\n${body}\n`));
+      if (stream) { append(ascii('stream\n')); append(stream); append(ascii('\nendstream\n')); }
+      append(ascii('endobj\n'));
+    };
+    append(ascii('%PDF-1.4\n'));
+    object(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    object(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+    object(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Sheet 4 0 R >> >> /Contents 5 0 R >>`);
+    object(4, `<< /Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`, jpeg);
+    const content = ascii(`q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Sheet Do Q`);
+    object(5, `<< /Length ${content.length} >>`, content);
+    const xref = length;
+    append(ascii(`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`));
+    return new Blob(chunks, { type: 'application/pdf' });
   }
 
   function mount() {
@@ -442,10 +562,25 @@
         printWindow.document.open();
         printWindow.document.write(fifoPrintDocument(entries, fifo, new Date(), controllerName));
         printWindow.document.close();
-        const print = () => { printWindow.focus(); printWindow.print(); };
-        printWindow.document.getElementById('print').addEventListener('click', print);
-        // Keep the preview open after printing/cancelling so Safari users can retry or share it.
-        print();
+        const fit = () => fitFifoSheet(printWindow.document);
+        printWindow.addEventListener('beforeprint', fit);
+        printWindow.addEventListener('afterprint', fit);
+        printWindow.addEventListener('resize', fit);
+        let pdfUrl;
+        printWindow.document.getElementById('print').addEventListener('click', () => {
+          try {
+            // Reuse the snapshot's PDF; its URL remains valid while this page is open.
+            if (!pdfUrl) pdfUrl = URL.createObjectURL(fifoPdf(printWindow.document));
+            const download = printWindow.document.getElementById('download');
+            download.href = pdfUrl; download.download = `FIFO-${day(new Date())}.pdf`; download.hidden = false;
+            const link = printWindow.document.createElement('a');
+            link.href = pdfUrl; link.target = '_blank'; link.rel = 'noopener';
+            printWindow.document.body.append(link); link.click(); link.remove();
+          } catch (_) {
+            printWindow.document.getElementById('pdf-status').textContent = 'PDF maken is mislukt. Probeer opnieuw via Open PDF.';
+          }
+        });
+        fit();
       } catch (_) { notify('Afdrukken kon niet worden gestart. Probeer opnieuw via Print / PDF.'); }
     }, 'head-icon print-fifo');
     setIcon(printButton, 'Print beide FIFO-tabellen of bewaar als PDF', 'M6 9V3h12v6 M6 18H3V9h18v9h-3 M6 14h12v7H6z M17 12h1');

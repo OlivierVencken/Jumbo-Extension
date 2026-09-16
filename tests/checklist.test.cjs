@@ -421,7 +421,7 @@ test('malformed FIFO storage is protected from overwrites', () => {
   } finally { dom.window.close(); }
 });
 
-test('FIFO print exports both categories, current edits and blank slots safely without changing storage', () => {
+test('FIFO export previews both categories, current edits and blank slots without printing the webpage', () => {
   const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
   data.entries[0].product.name = '<img src=x onerror=alert(1)> Melk & yoghurt';
   initial['ov.vulcheck.v1'] = JSON.stringify(data);
@@ -443,7 +443,7 @@ test('FIFO print exports both categories, current edits and blank slots safely w
     const before = w.localStorage.getItem('ov.vulcheck.v1');
     root.querySelector('.print-fifo').click();
     const doc = preview.window.document;
-    assert.equal(prints, 1);
+    assert.equal(prints, 0);
     assert.equal(doc.querySelectorAll('tbody tr').length, 5);
     const cells = doc.querySelector('tbody tr').querySelectorAll('td');
     assert.match(cells[0].textContent, /100000.*<img src=x onerror=alert\(1\)> Melk & yoghurt/s);
@@ -454,7 +454,7 @@ test('FIFO print exports both categories, current edits and blank slots safely w
     assert.equal(doc.querySelector('tbody tr:nth-child(2) td').textContent, '');
     assert.equal(doc.querySelectorAll('img,script,input,select').length, 0);
     assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), before);
-    doc.getElementById('print').click(); assert.equal(prints, 2);
+    assert.equal(doc.getElementById('print').textContent, 'Open PDF');
     root.querySelector('.nav button').click();
     assert.equal(root.querySelector('.print-fifo').hidden, true);
   } finally { dom.window.close(); preview.window.close(); }
@@ -469,4 +469,108 @@ test('blocked print popups explain how to retry and an empty FIFO list can be pr
     assert.match(root.querySelector('.toast').textContent, /pop-ups/);
     assert.equal(errors.length, 0);
   } finally { dom.window.close(); }
+});
+
+test('FIFO fits the entire form on narrow previews and refits tall content before printing', () => {
+  const preview = new JSDOM('');
+  let pageWidth = 390, pageHeight = 268, contentHeight = 720;
+  // jsdom has no layout: model a mobile preview followed by landscape print geometry.
+  Object.defineProperties(preview.window.HTMLElement.prototype, {
+    clientWidth: { get() { return this.className === 'sheet' ? pageWidth : 0; } },
+    clientHeight: { get() { return this.className === 'sheet' ? pageHeight : 0; } },
+    offsetWidth: { get() { return this.tagName === 'MAIN' ? 1047 : 0; } },
+    scrollHeight: { get() { return this.tagName === 'MAIN' ? contentHeight : 0; } }
+  });
+  preview.window.focus = preview.window.print = () => {};
+  const { dom, root } = setup(fifoFixture(), w => { w.open = () => preview.window; });
+  try {
+    root.querySelector('.fifo-button').click();
+    root.querySelector('.print-fifo').click();
+    const main = preview.window.document.querySelector('main');
+    const scale = () => Number(main.style.transform.match(/scale\(([^)]+)\)/)[1]);
+    assert.ok(main.querySelector('.notes'));
+    assert.ok(scale() * 1047 <= pageWidth);
+    assert.ok(scale() * contentHeight <= pageHeight);
+    // Long product/filler names must shrink, preserving notes on the same page.
+    pageWidth = 1047; pageHeight = 718; contentHeight = 1500;
+    preview.window.dispatchEvent(new preview.window.Event('beforeprint'));
+    assert.equal(scale(), pageHeight / contentHeight);
+    // Repeated printing measures original dimensions, so scaling never compounds.
+    preview.window.dispatchEvent(new preview.window.Event('beforeprint'));
+    assert.equal(scale(), pageHeight / contentHeight);
+    contentHeight = 650;
+    preview.window.dispatchEvent(new preview.window.Event('beforeprint'));
+    assert.equal(scale(), 1);
+    pageWidth = 390; pageHeight = 268;
+    preview.window.dispatchEvent(new preview.window.Event('afterprint'));
+    assert.equal(scale(), pageWidth / 1047);
+  } finally { dom.window.close(); preview.window.close(); }
+});
+
+test('direct PDF contains exactly one landscape page, valid byte offsets and a complete image', async () => {
+  const { createCanvas, loadImage } = require('@napi-rs/canvas');
+  for (const long of [false, true]) {
+    const preview = new JSDOM('');
+    const canvases = new WeakMap();
+    preview.window.HTMLCanvasElement.prototype.getContext = function () {
+      const canvas = createCanvas(this.width, this.height); canvases.set(this, canvas);
+      return canvas.getContext('2d');
+    };
+    preview.window.HTMLCanvasElement.prototype.toDataURL = function (...args) { return canvases.get(this).toDataURL(...args); };
+    const opened = [];
+    preview.window.HTMLAnchorElement.prototype.click = function () { opened.push(this.href); };
+    let pdf, created = 0;
+    const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
+    data.entries[0].product.name = long ? 'Lange productomschrijving '.repeat(8) : 'Crème fraîche & yoghurt';
+    data.fifo = Object.fromEntries(['zuivel', 'vvp'].map(category => [category, Array.from({ length: 5 }, (_, i) => ({
+      article: String(100000 + i), fifo: i % 2 === 0, names: long ? 'Zoë Anne-Marie '.repeat(12) : 'Zoë, Anne-Marie'
+    }))]));
+    initial['ov.vulcheck.v1'] = JSON.stringify(data);
+    const { dom, w, root } = setup(initial, w => {
+      w.open = () => preview.window;
+      w.URL.createObjectURL = blob => { pdf = blob; created++; return 'blob:https://product.jumbo.com/fixture'; };
+    });
+    try {
+      root.querySelector('.fifo-button').click(); root.querySelector('.print-fifo').click();
+      preview.window.document.getElementById('print').click();
+      assert.equal(pdf.type, 'application/pdf');
+      const bytes = await new Promise((resolve, reject) => {
+        const reader = new w.FileReader(); reader.onload = () => resolve(Buffer.from(reader.result)); reader.onerror = reject;
+        reader.readAsArrayBuffer(pdf);
+      });
+      const text = bytes.toString('latin1');
+      assert.equal((text.match(/\/Type \/Page\b/g) || []).length, 1);
+      assert.match(text, /\/MediaBox \[0 0 841.89 595.28\]/);
+      assert.match(text, /\/Count 1/);
+      const xref = Number(text.match(/startxref\n(\d+)/)[1]);
+      assert.equal(text.slice(xref, xref + 4), 'xref');
+      const offsets = text.slice(xref).match(/\d{10} 00000 n/g).map(line => Number(line.slice(0, 10)));
+      offsets.forEach((offset, i) => assert.ok(text.slice(offset).startsWith(`${i + 1} 0 obj\n`)));
+      const imageStart = text.indexOf('stream\n') + 7;
+      const imageLength = Number(text.slice(0, imageStart).match(/\/Length (\d+)/)[1]);
+      const image = await loadImage(bytes.subarray(imageStart, imageStart + imageLength));
+      assert.equal(image.width, 2526); assert.equal(image.height, 1786);
+      assert.equal(opened.length, 1);
+      assert.equal(preview.window.document.getElementById('download').hidden, false);
+      preview.window.document.getElementById('print').click();
+      assert.equal(created, 1); assert.equal(opened.length, 2);
+      if (process.env.FIFO_PDF_QA_DIR) {
+        fs.mkdirSync(process.env.FIFO_PDF_QA_DIR, { recursive: true });
+        fs.writeFileSync(require('node:path').join(process.env.FIFO_PDF_QA_DIR, long ? 'long.pdf' : 'normal.pdf'), bytes);
+      }
+    } finally { dom.window.close(); preview.window.close(); }
+  }
+});
+
+test('PDF generation failure leaves the preview available to retry', () => {
+  const preview = new JSDOM('');
+  preview.window.HTMLCanvasElement.prototype.getContext = () => null;
+  const { dom, root } = setup({}, w => { w.open = () => preview.window; });
+  try {
+    root.querySelector('.fifo-button').click(); root.querySelector('.print-fifo').click();
+    preview.window.document.getElementById('print').click();
+    assert.match(preview.window.document.getElementById('pdf-status').textContent, /mislukt/);
+    assert.equal(preview.window.document.getElementById('download').hidden, true);
+    assert.ok(preview.window.document.querySelector('.notes'));
+  } finally { dom.window.close(); preview.window.close(); }
 });
