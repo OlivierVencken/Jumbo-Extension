@@ -1,0 +1,6 @@
+{
+  "name": "jumbo-vulcheck-userscript",
+  "private": true,
+  "scripts": { "test": "node --test tests" },
+  "devDependencies": { "jsdom": "26.1.0" }
+}
