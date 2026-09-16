@@ -20,6 +20,8 @@ Product detection reads visible article details on `/p/artikel/…` pages, inclu
 
 Data is saved only in the browser on that device. Clearing Safari website data removes the saved list.
 
+The PDF's **Controleur** field is filled from the visible **Hello / Hallo {name}** greeting on the search page. The name stays available while navigating to products within the app and updates when another greeting appears. It is kept only in memory: after a full reload on a product page, visit the search page once before printing. If no greeting has been detected, the field remains blank for handwriting.
+
 ## Local verification
 
 `npm ci` then `npm test` runs extraction, checkbox, persistence, navigation, and storage-failure checks. `node tests/preview.cjs` serves a synthetic mobile fixture at `http://127.0.0.1:8124/p/artikel/fixture` for browser checks; it does not contact Jumbo.

@@ -272,6 +272,53 @@ function change(w, element, value, event = 'change') {
   element.value = value; element.dispatchEvent(new w.Event(event, { bubbles: true }));
 }
 
+test('greeting detection reads visible names, including nested text, and ignores inputs and hidden greetings', () => {
+  const { readGreetingName } = require('../jumbo-checklist.user.js');
+  const { dom, w } = setup();
+  try {
+    for (const [html, expected] of [
+      ['<h1 class="mx-text mx-name-text1">Hello Olivier</h1>', 'Olivier'],
+      ['<h5 class="mx-text mx-name-text1">Hallo Olivier 👋</h5>', 'Olivier'],
+      ['<h5 class="mx-text mx-name-text1">Hallo Zoë van Dijk 👋🏽</h5>', 'Zoë van Dijk'],
+      ['<div><h2 class="mx-text mx-name-text1">Hallo, <span>Zoë van Dijk</span>!</h2><p>Zoeken</p></div>', 'Zoë van Dijk'],
+      ['<p class="mx-text mx-name-text1">Hello Anne-Marie O’Neill!</p>', 'Anne-Marie O’Neill'],
+      ['<div hidden><h2 class="mx-text mx-name-text1">Hello Wrong</h2></div><h2 class="mx-text mx-name-text1">Hallo Sam</h2>', 'Sam'],
+      ['<h2 class="mx-text mx-name-text1" aria-hidden="true">Hello Wrong</h2><input value="Hello Search">', ''],
+      ['<h2 class="mx-text mx-name-text1" style="visibility:hidden">Hello Wrong</h2>', ''],
+      ['<p class="mx-text mx-name-text1">Hello</p>', ''],
+      ['<h1>Hello Wrong</h1><p class="mx-text mx-name-text1">Zoeken</p>', ''],
+    ]) {
+      w.document.querySelector('main').innerHTML = html;
+      assert.equal(readGreetingName(w.document), expected, html);
+    }
+  } finally { dom.window.close(); }
+});
+
+test('PDF prefills the greeting name, retains it on article navigation, and refreshes it on the search page', async () => {
+  const preview = new JSDOM('');
+  preview.window.focus = preview.window.print = () => {};
+  const { dom, w, root, tick } = setup({}, w => { w.open = () => preview.window; });
+  const printController = () => {
+    root.querySelector('.fifo-button').click();
+    root.querySelector('.print-fifo').click();
+    return preview.window.document.querySelector('.controller').textContent;
+  };
+  try {
+    assert.match(printController(), /____/);
+    w.history.pushState({}, '', '/p/producten');
+    w.document.querySelector('main').innerHTML = '<h5 class="mx-text mx-name-text1">Hallo Olivier 👋</h5>';
+    await tick();
+    assert.equal(printController(), 'Controleur: Olivier');
+    w.history.pushState({}, '', '/p/artikel/next');
+    w.document.querySelector('main').textContent = fusilli;
+    assert.equal(printController(), 'Controleur: Olivier');
+    w.history.pushState({}, '', '/p/producten');
+    w.document.querySelector('main').innerHTML = '<h5 class="mx-text mx-name-text1">Hallo Anne-Marie 👋</h5>';
+    assert.equal(printController(), 'Controleur: Anne-Marie');
+    assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), null);
+  } finally { dom.window.close(); preview.window.close(); }
+});
+
 test('FIFO has two five-row tables, unique saved choices, independent categories, and persistent answers', () => {
   const { dom, w, root, stored } = setup(fifoFixture());
   try {

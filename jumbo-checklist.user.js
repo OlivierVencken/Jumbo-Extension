@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.5.1
+// @version      0.5.3
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -195,7 +195,19 @@
     }
     return { ingest, reset() { cache.clear(); selected = null; } };
   }
-  const core = { day, parseProduct, parseBackup, addEntry, mergeEntries, createDecoder, productFromText, isProductPage };
+  function readGreetingName(doc) {
+    // Match a greeting element, not the full page, search input, or hidden previous screen.
+    for (const node of doc.querySelectorAll('.mx-text.mx-name-text1')) {
+      if (node.closest('#ov-vulcheck,[hidden],[aria-hidden="true"]') || !node.getClientRects().length ||
+          node.querySelector('input,textarea,select,button') || doc.defaultView.getComputedStyle(node).visibility !== 'visible') continue;
+      const text = (node.innerText || node.textContent || '').trim().replace(/\s+/g, ' ')
+        .replace(/\s*\u{1F44B}[\uFE0E\uFE0F]?[\u{1F3FB}-\u{1F3FF}]?\s*$/u, '').trim();
+      const match = /^(?:hello|hallo)\s*,?\s+([\p{L}\p{M}][\p{L}\p{M} .’'\-]{0,99}?)[!,]?$/iu.exec(text);
+      if (match) return match[1].trim();
+    }
+    return '';
+  }
+  const core = { day, parseProduct, parseBackup, addEntry, mergeEntries, createDecoder, productFromText, isProductPage, readGreetingName };
   if (typeof module === 'object' && module.exports) { module.exports = core; return; }
   if (window.top !== window.self || window.__ovVulcheck) return;
   window.__ovVulcheck = true;
@@ -227,7 +239,11 @@
   let fifo = parseFifo(undefined, new Set());
   let render = () => {}, notify = () => {}, requestsSeen = 0;
   let pageProduct = null, pageUrl = location.href, staleArticle = null;
+  let controllerName = '';
   function refreshPage() {
+    // Mendix keeps this script alive between the search screen and article pages.
+    // Do not persist a person's name alongside the shared checklist.
+    if (/^\/p\/producten\/?$/.test(location.pathname)) controllerName = readGreetingName(document) || controllerName;
     if (pageUrl !== location.href) {
       clearTimeout(backRecoveryTimer);
       staleArticle = pageProduct?.article || current?.article || null;
@@ -325,7 +341,7 @@
   }
 
   // A standalone document avoids printing Jumbo's page or the scrollable dialog.
-  function fifoPrintDocument(entries, fifo, date = new Date()) {
+  function fifoPrintDocument(entries, fifo, date = new Date(), controller = '') {
     const escape = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const products = new Map(entries.map(e => [e.product.article, e.product]));
     const cells = row => {
@@ -348,7 +364,7 @@
       /* Zero page margins suppress browser headers/footers; the sheet provides its own inset. */
       @page{size:A4 landscape;margin:0}@media print{body{background:white}.actions{display:none}main{width:auto;margin:0;padding:10mm}thead{display:table-header-group}}
       </style></head><body><div class="actions"><button type="button" id="print">Print / PDF</button><p>Kies een printer of bewaar als PDF via het afdrukmenu.</p></div><main>
-      <h1>Dagelijkse FIFO check!</h1><div class="meta"><span><strong>Datum:</strong> ${escape(date.toLocaleDateString('nl-NL'))}</span><span><strong>Dag:</strong> ${escape(date.toLocaleDateString('nl-NL', { weekday: 'long' }))}</span><span class="controller"><strong>Controleur:</strong> ________________________</span></div>
+      <h1>Dagelijkse FIFO check!</h1><div class="meta"><span><strong>Datum:</strong> ${escape(date.toLocaleDateString('nl-NL'))}</span><span><strong>Dag:</strong> ${escape(date.toLocaleDateString('nl-NL', { weekday: 'long' }))}</span><span class="controller"><strong>Controleur:</strong> ${controller ? escape(controller) : '________________________'}</span></div>
       <table aria-label="FIFO controle Zuivel en VVP"><colgroup><col style="width:10%"><col style="width:25%"><col style="width:7%"><col style="width:13%"><col style="width:25%"><col style="width:7%"><col style="width:13%"></colgroup>
       <thead><tr><th scope="col">Productgroep</th><th scope="col">Artikelnummer - zuivel</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th><th scope="col">Artikelnummer - VVP</th><th scope="col">Fifo?</th><th scope="col">Wie gevuld?</th></tr></thead>
       <tbody>${Array.from({ length: 5 }, (_, i) => `<tr><th scope="row">Product ${i + 1}</th>${cells(fifo.zuivel[i])}${cells(fifo.vvp[i])}</tr>`).join('')}</tbody></table>
@@ -419,7 +435,7 @@
       try {
         printWindow.opener = null;
         printWindow.document.open();
-        printWindow.document.write(fifoPrintDocument(entries, fifo));
+        printWindow.document.write(fifoPrintDocument(entries, fifo, new Date(), controllerName));
         printWindow.document.close();
         const print = () => { printWindow.focus(); printWindow.print(); };
         printWindow.document.getElementById('print').addEventListener('click', print);
