@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.5.5
+// @version      0.5.7
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -509,6 +509,7 @@
       dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,400px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#fff;color:#222;box-shadow:-4px 0 24px #0002}
       dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction:column}
       .head{display:flex;flex-shrink:0;align-items:center;justify-content:space-between;gap:8px;padding:12px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}
+      .head:focus{outline:none}
       .close,.remove{flex-shrink:0;display:grid;place-items:center;width:44px;height:44px;background:transparent;border-radius:4px;font-size:25px;font-weight:400}.close:hover,.remove:hover{background:#f4f4f4}
       .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}.head-icon{display:grid;place-items:center;width:44px;height:44px;padding:10px;border-radius:4px;background:transparent}.head-icon:hover{background:#f4f4f4}.head-icon:disabled{opacity:.5;cursor:default}
       .body{overflow:auto;overscroll-behavior:contain;flex:1;padding:0 16px calc(16px + env(safe-area-inset-bottom))}.list{list-style:none;margin:0;padding:0}
@@ -519,6 +520,41 @@
       .nav{display:flex;gap:4px;min-width:0}.nav button{padding:10px 8px;min-height:44px;border-radius:4px;background:#f2f2f2;font-size:14px;white-space:nowrap}.nav button[aria-pressed="true"]{background:#ffcc00;font-weight:700}
       dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px}.fifo-table th{text-align:left;padding:8px 4px;border-bottom:2px solid #ffcc00}.fifo-table th:first-child{width:43%}.fifo-table th:nth-child(2){width:25%}.fifo-table td{padding:10px 4px;border-bottom:1px solid #e9e9e9;vertical-align:top}
       .fifo-table select,.fifo-table input{display:block;box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;max-height:44px;margin:0;padding:6px;border:1px solid #aaa;border-radius:4px;background:#fff;color:#222;font:inherit;font-size:16px;line-height:normal}.fifo-table select:focus-visible{outline:3px solid #222;outline-offset:2px}.fifo-table :disabled{opacity:.5}.fifo-help{font-size:14px;color:#666}
+      /* Keep motion on stable containers: data refreshes must not replay every row. */
+      @media (prefers-reduced-motion:no-preference){
+        @keyframes panel-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
+        @keyframes backdrop-in{from{background:#0000}to{background:#0005}}
+        @keyframes content-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes saved{0%,100%{transform:scale(1)}45%{transform:scale(1.16)}}
+        dialog[open]{animation:panel-in 240ms cubic-bezier(.2,.8,.2,1)}
+        dialog[open]::backdrop{animation:backdrop-in 240ms ease-out}
+        .list:not([hidden]),.fifo-page:not([hidden]){animation:content-in 180ms ease-out}
+        .toast:not([hidden]){animation:content-in 200ms ease-out}
+        .save-product input:checked{animation:saved 220ms ease-out}
+        button{transition:background-color 140ms ease,color 140ms ease,box-shadow 160ms ease,transform 140ms ease}
+        button:enabled:active{transform:scale(.96)}
+        .save-product input{transition:box-shadow 160ms ease}
+        .photo{transition:transform 180ms ease}
+        .fifo-table select,.fifo-table input{transition:border-color 140ms ease,background-color 140ms ease}
+        .fifo-table select:focus,.fifo-table input:focus{border-color:#8a7000;background-color:#fffdf2}
+        @media (hover:hover) and (pointer:fine){
+          .launch:hover{transform:translateY(-2px);box-shadow:0 5px 16px #0003}
+          .launch:active{transform:translateY(0) scale(.96)}
+          .product[href]:hover .photo{transform:scale(1.04)}
+        }
+        /* Enhanced exit motion where the browser can retain the dialog's top layer.
+           Older browsers still get the entry animation and native instant closing. */
+        @supports (transition-behavior:allow-discrete) and (overlay:auto){
+          dialog{opacity:0;transform:translateX(24px);transition:opacity 200ms ease,transform 240ms cubic-bezier(.2,.8,.2,1),display 240ms allow-discrete,overlay 240ms allow-discrete}
+          dialog[open]{opacity:1;transform:translateX(0);animation:none}
+          dialog::backdrop{background:#0000;transition:background-color 240ms ease,display 240ms allow-discrete,overlay 240ms allow-discrete}
+          dialog[open]::backdrop{background:#0005;animation:none}
+          @starting-style{
+            dialog[open]{opacity:0;transform:translateX(24px)}
+            dialog[open]::backdrop{background:#0000}
+          }
+        }
+      }
     `;
     host.style.setProperty('--list-font', getComputedStyle(document.body).fontFamily || 'Arial, sans-serif');
     root.append(style);
@@ -532,7 +568,7 @@
       svg.append(shape); control.replaceChildren(svg);
     }
     let view = 'list';
-    const launch = button('Mijn lijst', () => { view = 'list'; load(); render(); dialog.showModal(); }, 'launch');
+    const launch = button('Mijn lijst', () => { view = 'list'; load(); render(); dialog.showModal(); head.focus({ preventScroll: true }); }, 'launch');
     const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
     quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product');
     quickSave.append(quickCheck); quickSave.hidden = true;
@@ -551,6 +587,9 @@
       render();
     });
     const dialog = el('dialog'), shell = el('div', undefined, 'shell'), head = el('header', undefined, 'head');
+    // Start focus on the header so Safari does not outline the first tab on opening.
+    // It stays outside the tab order; keyboard navigation still highlights controls.
+    head.tabIndex = -1; head.setAttribute('autofocus', '');
     const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', 'Sluiten');
     const printButton = button('', () => {
       load(); render();
