@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.3.2
-// @description  Bewaar Jumbo-producten in een eenvoudige lokale productlijst.
+// @version      0.4.1
+// @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
 // @inject-into  page
@@ -68,6 +68,25 @@
   function mergeEntries(existing, incoming) {
     const ids = new Set(existing.map(e => e.id));
     return [...existing, ...incoming.filter(e => !ids.has(e.id))];
+  }
+  const emptyFifoRow = () => ({ article: '', fifo: null, names: '' });
+  function parseFifo(data, products) {
+    const result = {};
+    for (const category of ['zuivel', 'vvp']) {
+      const rows = data === undefined ? [] : data?.[category];
+      if (!Array.isArray(rows) || rows.length > 5) throw Error('Ongeldige FIFO-lijst.');
+      const seen = new Set();
+      result[category] = Array.from({ length: 5 }, (_, i) => {
+        const row = rows[i];
+        if (row === undefined) return emptyFifoRow();
+        if (!row || typeof row.article !== 'string' || (row.article && !/^\d{1,20}$/.test(row.article)) ||
+            ![null, true, false].includes(row.fifo) || typeof row.names !== 'string' || row.names.length > 200 ||
+            (row.article && seen.has(row.article))) throw Error('Ongeldige FIFO-regel.');
+        seen.add(row.article);
+        return products.has(row.article) ? { article: row.article, fifo: row.fifo, names: row.names } : emptyFifoRow();
+      });
+    }
+    return result;
   }
   // Read rendered product details as well as network data: Safari can inject after
   // the initial responses, or run the script in a separate JavaScript world.
@@ -205,6 +224,7 @@
 
   const decoder = createDecoder();
   let current = null, generation = 0, entries = [], storageBroken = false;
+  let fifo = parseFifo(undefined, new Set());
   let render = () => {}, notify = () => {}, requestsSeen = 0;
   let pageProduct = null, pageUrl = location.href, staleArticle = null;
   function refreshPage() {
@@ -229,16 +249,20 @@
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      entries = raw ? parseBackup(JSON.parse(raw)) : [];
+      const data = raw ? JSON.parse(raw) : undefined;
+      const next = data ? parseBackup(data) : [];
+      const nextFifo = parseFifo(data?.fifo, new Set(next.map(e => e.product.article)));
+      entries = next; fifo = nextFifo;
       storageBroken = false;
     } catch { storageBroken = true; }
   }
   load();
-  function save(next) {
+  function save(next, nextFifo = fifo) {
     if (storageBroken) { notify('Opslag niet leesbaar. Bestaande gegevens worden niet overschreven.'); return false; }
     try {
-      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next }));
-      entries = next;
+      const cleanedFifo = parseFifo(nextFifo, new Set(next.map(e => e.product.article)));
+      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo }));
+      entries = next; fifo = cleanedFifo;
       return true;
     } catch { notify('Opslaan mislukt. Maak ruimte vrij of controleer Safari-opslag.'); return false; }
   }
@@ -322,12 +346,16 @@
       .photo{flex:0 0 56px;width:56px;height:56px;display:grid;place-items:center;border-radius:4px;background:#fafafa}.photo img{width:100%;height:100%;object-fit:contain}.placeholder{width:22px;height:28px;border:1.5px solid #b5b5b5;border-radius:3px;background:linear-gradient(#fafafa 35%,#ffcc00 35%,#ffcc00 65%,#fafafa 65%)}
       .name{display:block;font-size:14px;font-weight:700;overflow-wrap:anywhere}.sub{display:block;font-size:13px;color:#707070;margin-top:3px}.remove{font-size:20px;color:#707070;margin-left:4px}.empty{padding:32px 0;color:#707070;font-size:14px}
       .toast{pointer-events:auto;position:fixed;bottom:calc(76px + env(safe-area-inset-bottom));right:16px;max-width:min(360px,calc(100vw - 32px));padding:12px 16px;background:#222;color:#fff;border-radius:4px;font-size:14px;box-shadow:0 2px 12px #0002}
+      .nav{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid #eee}.nav button{padding:10px 12px;min-height:44px;border-radius:4px;background:#f2f2f2}.nav button[aria-pressed="true"]{background:#ffcc00;font-weight:700}
+      dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px}.fifo-table th{text-align:left;padding:8px 4px;border-bottom:2px solid #ffcc00}.fifo-table th:first-child{width:43%}.fifo-table th:nth-child(2){width:25%}.fifo-table td{padding:10px 4px;border-bottom:1px solid #e9e9e9;vertical-align:top}
+      .fifo-table select,.fifo-table input{display:block;box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;max-height:44px;margin:0;padding:6px;border:1px solid #aaa;border-radius:4px;background:#fff;color:#222;font:inherit;font-size:16px;line-height:normal}.fifo-table select:focus-visible{outline:3px solid #222;outline-offset:2px}.fifo-table :disabled{opacity:.5}.fifo-help{font-size:14px;color:#666}
     `;
     host.style.setProperty('--list-font', getComputedStyle(document.body).fontFamily || 'Arial, sans-serif');
     root.append(style);
     function el(tag, text, cls) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; }
     function button(text, action, cls) { const b = el('button', text, cls); b.type = 'button'; b.addEventListener('click', action); return b; }
-    const launch = button('Mijn lijst', () => { load(); render(); dialog.showModal(); }, 'launch');
+    let view = 'list';
+    const launch = button('Mijn lijst', () => { view = 'list'; load(); render(); dialog.showModal(); }, 'launch');
     const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
     quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product');
     quickSave.append(quickCheck); quickSave.hidden = true;
@@ -351,12 +379,84 @@
     const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', 'Sluiten');
     head.append(title, close);
     const body = el('div', undefined, 'body'), list = el('ul', undefined, 'list');
-    body.append(list); shell.append(head, body); dialog.append(shell);
+    const nav = el('nav', undefined, 'nav'); nav.setAttribute('aria-label', 'Vulcheck pagina’s');
+    const showView = next => { view = next; load(); render(); };
+    const listButton = button('Mijn lijst', () => showView('list'));
+    const fifoButton = button('Fifo check', () => showView('fifo'), 'fifo-button');
+    nav.append(listButton, fifoButton);
+    const fifoPage = el('div', undefined, 'fifo-page');
+    body.append(list, fifoPage); shell.append(head, nav, body); dialog.append(shell);
     const toast = el('div', '', 'toast'); toast.hidden = true; toast.setAttribute('role', 'status');
     root.append(launch, quickSave, dialog, toast); document.body.append(host);
     let toastTimer;
     notify = message => { (dialog.open ? shell : root).append(toast); toast.textContent = message; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6500); };
     let listSignature = '';
+    let fifoSignature = '';
+    function renderFifo() {
+      title.textContent = view === 'fifo' ? 'Fifo check' : 'Mijn lijst';
+      dialog.classList.toggle('fifo-view', view === 'fifo');
+      list.hidden = view !== 'list'; fifoPage.hidden = view !== 'fifo';
+      listButton.setAttribute('aria-pressed', String(view === 'list'));
+      fifoButton.setAttribute('aria-pressed', String(view === 'fifo'));
+      if (view !== 'fifo') return;
+      const products = [...new Map(entries.map(e => [e.product.article, e.product])).values()]
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+      const signature = JSON.stringify([storageBroken, fifo, products]);
+      if (signature === fifoSignature) return;
+      fifoSignature = signature;
+      fifoPage.replaceChildren();
+      if (storageBroken || !products.length) fifoPage.append(el('p', storageBroken ?
+        'Je opgeslagen gegevens kunnen niet worden gelezen.' :
+        'Bewaar eerst producten in Mijn lijst. Daarna kun je ze hier kiezen.', 'fifo-help'));
+      for (const category of ['zuivel', 'vvp']) {
+        const label = category === 'zuivel' ? 'Zuivel' : 'VVP';
+        const section = el('section', undefined, 'fifo-section'), heading = el('h2', label);
+        heading.id = 'fifo-' + category;
+        const table = el('table', undefined, 'fifo-table'); table.dataset.category = category;
+        table.setAttribute('aria-labelledby', heading.id);
+        const thead = el('thead'), header = el('tr'), tbody = el('tbody');
+        for (const text of ['Product', 'Fifo', 'Wie gevuld']) { const th = el('th', text); th.scope = 'col'; header.append(th); }
+        thead.append(header); table.append(thead, tbody);
+        fifo[category].forEach((row, index) => {
+          const tr = el('tr'), product = el('select'), status = el('select'), names = el('input');
+          const accessible = `${label}, rij ${index + 1}`;
+          product.setAttribute('aria-label', 'Product — ' + accessible);
+          status.setAttribute('aria-label', 'Fifo — ' + accessible);
+          names.setAttribute('aria-label', 'Wie gevuld — ' + accessible);
+          const option = (select, value, text) => { const o = el('option', text); o.value = value; select.append(o); };
+          option(product, '', 'Kies product…');
+          for (const p of products) {
+            if (p.article === row.article || !fifo[category].some(r => r.article === p.article))
+              option(product, p.article, `${p.name}${p.size ? ' · ' + p.size : ''}`);
+          }
+          product.value = row.article; product.disabled = storageBroken || !products.length;
+          option(status, '', '—'); option(status, 'yes', 'Ja'); option(status, 'no', 'Nee');
+          status.value = row.fifo === null ? '' : row.fifo ? 'yes' : 'no';
+          names.type = 'text'; names.maxLength = 200; names.placeholder = 'Naam / namen'; names.value = row.names;
+          status.disabled = names.disabled = storageBroken || !row.article;
+          function update(field, value) {
+            load();
+            if (fifo[category][index].article !== row.article) { fifoSignature = ''; render(); notify('Deze rij is gewijzigd. Probeer opnieuw.'); return; }
+            if (field === 'article' && value && fifo[category].some((r, i) => i !== index && r.article === value)) {
+              fifoSignature = ''; render(); return;
+            }
+            const next = { ...fifo, [category]: fifo[category].map((r, i) => i !== index ? r :
+              field === 'article' ? { ...emptyFifoRow(), article: value } : { ...r, [field]: value }) };
+            const saved = save(entries, next);
+            // Keep the text field and caret intact while typing.
+            if (saved && field === 'names') fifoSignature = JSON.stringify([storageBroken, fifo, products]);
+            else fifoSignature = '';
+            render();
+          }
+          product.addEventListener('change', () => update('article', product.value));
+          status.addEventListener('change', () => update('fifo', status.value === '' ? null : status.value === 'yes'));
+          names.addEventListener('input', () => update('names', names.value));
+          for (const control of [product, status, names]) { const td = el('td'); td.append(control); tr.append(td); }
+          tbody.append(tr);
+        });
+        section.append(heading, table); fifoPage.append(section);
+      }
+    }
     function renderList() {
       const unique = new Map();
       for (const entry of [...entries].sort((a, b) => b.added.localeCompare(a.added))) {
@@ -420,6 +520,7 @@
       quickCheck.setAttribute('aria-label', exists ? 'Verwijder dit product uit mijn lijst' : 'Bewaar dit product');
       quickSave.title = product ? product.name + (exists ? ' · Op mijn lijst' : ' · Bewaren') : 'Product laden…';
       renderList();
+      renderFifo();
     };
     window.addEventListener('storage', e => { if (e.key === KEY || e.key === null) { load(); render(); } });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { load(); render(); } });

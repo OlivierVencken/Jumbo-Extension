@@ -10,6 +10,10 @@ Personal Jumbo checklist userscript for Safari/Userscripts.
 
 Unchecking the top-right checkbox or using a product's remove button removes it from the list. Reloading preserves the list, and products remain visible across days. Existing version 0.1.0 data remains compatible.
 
+Open **Mijn lijst → Fifo check** for the **Zuivel** and **VVP** tables. Each table has five slots with **Product**, **Fifo**, and **Wie gevuld** columns. Choose from your saved products, select **Ja** or **Nee**, and enter one or more names. The initial **—** means not checked yet. Each product can be selected once per category. Select **Kies product…** to clear a slot.
+
+FIFO selections, answers, and names save automatically on this device and remain until changed, including across days. Replacing a product clears that row's answer and names. Removing a product from Mijn lijst also clears its FIFO rows.
+
 Product detection reads visible article details on `/p/artikel/…` pages, including the unlabelled article number above the name. This works without needing to capture the page's initial network response. The previous response decoder remains as a fallback. Product detection is based on the supplied screenshot; the authenticated Jumbo page and iPhone Safari still need an on-device check.
 
 Data is saved only in the browser on that device. Clearing Safari website data removes the saved list.

@@ -260,3 +260,74 @@ test('stored links reject scripts and unrelated product destinations', () => {
   assert.equal(parseProduct({ ...p, image: 'javascript:alert(1)' }).image, undefined);
   assert.equal(parseBackup({version: 1, entries: []}).length, 0);
 });
+
+function fifoFixture() {
+  const entries = Array.from({ length: 6 }, (_, i) => ({
+    day: '2026-09-16', product: { article: String(100000 + i), name: `Product ${i + 1}`, eans: [] },
+    done: false, note: '', added: '2026-09-16T12:00:00Z'
+  }));
+  return { 'ov.vulcheck.v1': JSON.stringify({ version: 1, entries }) };
+}
+function change(w, element, value, event = 'change') {
+  element.value = value; element.dispatchEvent(new w.Event(event, { bubbles: true }));
+}
+
+test('FIFO has two five-row tables, unique saved choices, independent categories, and persistent answers', () => {
+  const { dom, w, root, stored } = setup(fifoFixture());
+  try {
+    root.querySelector('.launch').click(); root.querySelector('.fifo-button').click();
+    assert.equal(root.querySelectorAll('.fifo-table').length, 2);
+    const rows = category => root.querySelectorAll(`[data-category="${category}"] tbody tr`);
+    const controls = (category, index) => rows(category)[index].querySelectorAll('select, input');
+    assert.equal(rows('zuivel').length, 5); assert.equal(rows('vvp').length, 5);
+    assert.equal(controls('zuivel', 0)[1].disabled, true);
+    for (let i = 0; i < 5; i++) change(w, controls('zuivel', i)[0], String(100000 + i));
+    assert.equal(controls('zuivel', 0)[0].options.length, 3); // blank, current product, unused sixth
+    change(w, controls('zuivel', 0)[1], 'yes');
+    const input = controls('zuivel', 0)[2]; input.focus();
+    change(w, input, 'Anne, Sam', 'input');
+    assert.equal(root.activeElement, input);
+    change(w, controls('vvp', 0)[0], '100000'); change(w, controls('vvp', 0)[1], 'no');
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: true, names: 'Anne, Sam' });
+    assert.equal(stored().fifo.vvp[0].fifo, false);
+    const second = setup({ 'ov.vulcheck.v1': w.localStorage.getItem('ov.vulcheck.v1') });
+    try {
+      second.root.querySelector('.fifo-button').click();
+      assert.equal(second.root.querySelector('.fifo-table input').value, 'Anne, Sam');
+      assert.equal(second.root.querySelectorAll('.fifo-table select')[1].value, 'yes');
+    } finally { second.dom.window.close(); }
+    change(w, controls('zuivel', 0)[0], '100005');
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '100005', fifo: null, names: '' });
+    change(w, controls('zuivel', 0)[0], '');
+    assert.equal(controls('zuivel', 0)[2].disabled, true);
+  } finally { dom.window.close(); }
+});
+
+test('removing a saved product clears its FIFO row and failed writes restore the saved answer', () => {
+  const { dom, w, root, stored } = setup(fifoFixture());
+  try {
+    root.querySelector('.fifo-button').click();
+    change(w, root.querySelector('.fifo-table select'), '100000');
+    const originalSet = w.Storage.prototype.setItem;
+    w.Storage.prototype.setItem = () => { throw Error('QuotaExceededError'); };
+    change(w, root.querySelectorAll('.fifo-table select')[1], 'yes');
+    assert.equal(root.querySelectorAll('.fifo-table select')[1].value, '');
+    assert.equal(stored().fifo.zuivel[0].fifo, null);
+    assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
+    w.Storage.prototype.setItem = originalSet;
+    root.querySelector('.nav button').click(); root.querySelector('.remove').click();
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '', fifo: null, names: '' });
+  } finally { dom.window.close(); }
+});
+
+test('malformed FIFO storage is protected from overwrites', () => {
+  const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
+  data.fifo = { zuivel: Array(6).fill({ article: '', fifo: null, names: '' }), vvp: [] };
+  initial['ov.vulcheck.v1'] = JSON.stringify(data);
+  const { dom, w, root } = setup(initial);
+  try {
+    root.querySelector('.fifo-button').click();
+    assert.equal(root.querySelector('.fifo-table select').disabled, true);
+    assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
+  } finally { dom.window.close(); }
+});
