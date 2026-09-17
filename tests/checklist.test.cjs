@@ -11,7 +11,7 @@ const fusilli = `717144\nJUMBO FUSILLI\n1\n15\n500 GR\nIn assortiment\nLocatie\n
 test('reads the screenshot layout without an article-number label or semantic title', () => {
   assert.deepEqual(productFromText(fusilli, ['Eigenschappen', 'Beschikbaarheid'], url), {
     article: '717144', name: 'JUMBO FUSILLI', size: '500 GR', category: 'PASTA',
-    pack: '12 stuks', eans: ['8718452931859']
+    pack: '12 stuks', eans: ['8718452931859'], location: 'meter 2, plank 7, positie 3'
   });
 });
 
@@ -243,7 +243,7 @@ test('older products stay visible across days, deduplicate, and acquire links on
   }));
   const { dom, root, listAction, stored } = setup({ 'ov.vulcheck.v1': JSON.stringify({ version: 1, entries }) });
   try {
-    assert.equal(root.querySelectorAll('.item').length, 1);
+    assert.equal(root.querySelectorAll('.body > .list > .item').length, 1);
     assert.equal((listAction.getAttribute('aria-pressed') === 'true'), true);
     assert.equal(root.querySelector('.product').href, url);
     assert.equal(stored().entries[0].note, 'Keep this note');
@@ -341,7 +341,7 @@ test('product menu adds independent FIFO products, persists and exports them wit
     try {
       assert.equal(second.root.querySelector('[data-destination="zuivel"]').getAttribute('aria-pressed'), 'true');
       second.root.querySelector('.fifo-button').click();
-      assert.match(second.root.querySelector('.fifo-table select').selectedOptions[0].textContent, /JUMBO FUSILLI/);
+      assert.match(second.root.querySelector('[data-category="zuivel"]').textContent, /JUMBO FUSILLI/);
     } finally { second.w.close(); }
     zuivel.click();
     assert.equal(stored().fifo.zuivel[0].article, '');
@@ -390,10 +390,12 @@ test('product menu stays open through delayed focus changes, refreshes, and opti
 });
 
 test('full FIFO categories and failed writes preserve products and independent destinations', () => {
-  const { w, root, stored } = setup(fifoFixture());
+  const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
+  data.fifo = { zuivel: Array.from({ length: 5 }, (_, i) => ({ article: String(100000 + i), fifo: null, names: '' })), vvp: [] };
+  initial['ov.vulcheck.v1'] = JSON.stringify(data);
+  const { w, root, stored } = setup(initial);
   try {
     root.querySelector('.fifo-button').click();
-    for (let i = 0; i < 5; i++) change(w, root.querySelectorAll('[data-category="zuivel"] tbody tr')[i].querySelector('select'), String(100000 + i));
     const before = JSON.stringify(stored());
     const zuivel = root.querySelector('[data-destination="zuivel"]'), vvp = root.querySelector('[data-destination="vvp"]');
     zuivel.click();
@@ -411,52 +413,86 @@ test('full FIFO categories and failed writes preserve products and independent d
   } finally { w.close(); }
 });
 
-test('FIFO has two five-row tables, unique saved choices, independent categories, and persistent answers', () => {
-  const { dom, w, root, stored } = setup(fifoFixture());
+test('FIFO round shows selected products, filters categories, collects names only for no, and finishes', () => {
+  const preview = new JSDOM('');
+  const { w, root, stored } = setup({}, w => { w.open = () => preview.window; });
   try {
+    root.querySelector('[data-destination="zuivel"]').click();
+    root.querySelector('[data-destination="vvp"]').click();
     root.querySelector('.launch').click(); root.querySelector('.fifo-button').click();
-    assert.equal(root.querySelectorAll('.fifo-table').length, 2);
-    const rows = category => root.querySelectorAll(`[data-category="${category}"] tbody tr`);
-    const controls = (category, index) => rows(category)[index].querySelectorAll('select, input');
-    assert.equal(rows('zuivel').length, 5); assert.equal(rows('vvp').length, 5);
-    assert.equal(controls('zuivel', 0)[1].disabled, true);
-    for (let i = 0; i < 5; i++) change(w, controls('zuivel', i)[0], String(100000 + i));
-    assert.equal(controls('zuivel', 0)[0].options.length, 3); // blank, current product, unused sixth
-    change(w, controls('zuivel', 0)[1], 'yes');
-    const input = controls('zuivel', 0)[2]; input.focus();
+    assert.equal(root.querySelectorAll('.fifo-page .item').length, 2);
+    assert.equal(root.querySelectorAll('.fifo-page input,.fifo-page select').length, 0);
+    root.querySelector('.start-round').click();
+    assert.equal(root.querySelector('.fifo-page').hidden, true);
+    assert.equal(root.querySelector('.round-page').hidden, false);
+    assert.match(root.querySelector('.round-card').textContent, /717144/);
+    assert.match(root.querySelector('.round-card').textContent, /meter 2, plank 7, positie 3/);
+    root.querySelector('[data-filter="vvp"]').click();
+    root.querySelector('.round-no').click();
+    const input = root.querySelector('.round-names input');
+    change(w, input, '  ', 'input');
+    root.querySelector('.round-names').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    assert.equal(stored().fifo.vvp[0].fifo, null);
     change(w, input, 'Anne, Sam', 'input');
-    assert.equal(root.activeElement, input);
-    change(w, controls('vvp', 0)[0], '100000'); change(w, controls('vvp', 0)[1], 'no');
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: true, names: 'Anne, Sam' });
-    assert.equal(stored().fifo.vvp[0].fifo, false);
-    const second = setup({ 'ov.vulcheck.v1': w.localStorage.getItem('ov.vulcheck.v1') });
+    w.dispatchEvent(new w.StorageEvent('storage', { key: 'ov.vulcheck.v1' }));
+    assert.equal(root.querySelector('.round-names input').value, 'Anne, Sam');
+    root.querySelector('.round-names').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    assert.deepEqual(stored().fifo.vvp[0], { article: '717144', fifo: false, names: 'Anne, Sam' });
+    const interrupted = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
     try {
-      second.root.querySelector('.fifo-button').click();
-      assert.equal(second.root.querySelector('.fifo-table input').value, 'Anne, Sam');
-      assert.equal(second.root.querySelectorAll('.fifo-table select')[1].value, 'yes');
-    } finally { second.dom.window.close(); }
-    change(w, controls('zuivel', 0)[0], '100005');
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '100005', fifo: null, names: '' });
-    change(w, controls('zuivel', 0)[0], '');
-    assert.equal(controls('zuivel', 0)[2].disabled, true);
-  } finally { dom.window.close(); }
+      interrupted.root.querySelector('.fifo-button').click(); interrupted.root.querySelector('.resume-round').click();
+      assert.match(interrupted.root.querySelector('.round-progress').textContent, /1 van 2/);
+      interrupted.root.querySelector('.round-yes').click();
+      assert.equal(interrupted.stored().fifo.vvp[0].names, 'Anne, Sam');
+      assert.ok(interrupted.root.querySelector('.round-print'));
+    } finally { interrupted.w.close(); }
+
+    assert.equal(root.querySelector('.round-print'), null);
+    root.querySelector('[data-filter="zuivel"]').click();
+    assert.equal(root.querySelector('.round-names'), null);
+    root.querySelector('.round-yes').click();
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+    assert.match(root.querySelector('.round-page').textContent, /FIFO check afgerond/);
+    root.querySelector('.round-print').click();
+    assert.match(preview.window.document.querySelector('tbody').textContent, /Anne, Sam/);
+    const second = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
+    try { assert.equal(second.stored().fifo.vvp[0].names, 'Anne, Sam'); } finally { second.w.close(); }
+    root.querySelector('.round-back').click(); root.querySelector('.start-round').click();
+    assert.equal(stored().fifo.vvp[0].fifo, null);
+    assert.equal(stored().fifo.vvp[0].names, '');
+    assert.equal(stored().fifo.zuivel[0].article, '717144');
+    assert.deepEqual(stored().entries, []);
+  } finally { w.close(); preview.window.close(); }
 });
 
-test('removing a saved product preserves its FIFO row and failed writes restore the saved answer', () => {
-  const { dom, w, root, stored } = setup(fifoFixture());
+test('FIFO round cannot advance after failed writes and can resume after returning to overview', () => {
+  const { w, root, stored } = setup();
   try {
-    root.querySelector('.fifo-button').click();
-    change(w, root.querySelector('.fifo-table select'), '100000');
+    root.querySelector('[data-destination="zuivel"]').click();
+    root.querySelector('.fifo-button').click(); root.querySelector('.start-round').click();
     const originalSet = w.Storage.prototype.setItem;
     w.Storage.prototype.setItem = () => { throw Error('QuotaExceededError'); };
-    change(w, root.querySelectorAll('.fifo-table select')[1], 'yes');
-    assert.equal(root.querySelectorAll('.fifo-table select')[1].value, '');
+    root.querySelector('.round-yes').click();
     assert.equal(stored().fifo.zuivel[0].fifo, null);
+    assert.ok(root.querySelector('.round-yes'));
     assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
     w.Storage.prototype.setItem = originalSet;
-    root.querySelector('.nav button').click(); root.querySelector('.remove').click();
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: null, names: '' });
-  } finally { dom.window.close(); }
+    root.querySelector('.round-back').click(); root.querySelector('.resume-round').click();
+    root.querySelector('.round-no').click(); root.querySelector('.round-yes').click();
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+  } finally { w.close(); }
+});
+
+test('FIFO overview removes only the chosen category and disables start when empty', () => {
+  const { w, root, stored } = setup();
+  try {
+    root.querySelector('.fifo-button').click();
+    assert.equal(root.querySelector('.start-round').disabled, true);
+    root.querySelector('[data-destination="zuivel"]').click(); root.querySelector('[data-destination="vvp"]').click();
+    root.querySelector('[data-category="zuivel"] .remove').click();
+    assert.equal(stored().fifo.zuivel[0].article, '');
+    assert.equal(stored().fifo.vvp[0].article, '717144');
+  } finally { w.close(); }
 });
 
 test('clearing the list preserves independent FIFO selections', () => {
@@ -468,19 +504,19 @@ test('clearing the list preserves independent FIFO selections', () => {
     assert.equal(clear.disabled, false);
     root.querySelector('.fifo-button').click();
     assert.equal(clear.hidden, true);
-    change(w, root.querySelector('.fifo-table select'), '100000');
-    change(w, root.querySelectorAll('.fifo-table select')[1], 'yes');
+    root.querySelector('[data-destination="zuivel"]').click();
+    root.querySelector('.start-round').click(); root.querySelector('.round-yes').click();
     root.querySelector('.nav button').click();
     clear.click();
     assert.deepEqual(stored().entries, []);
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: true, names: '' });
-    assert.equal(stored().fifoProducts[0].article, '100000');
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+    assert.equal(stored().fifoProducts[0].article, '717144');
     assert.equal((listAction.getAttribute('aria-pressed') === 'true'), false);
-    assert.equal(root.querySelectorAll('.item').length, 0);
+    assert.equal(root.querySelectorAll('.body > .list > .item').length, 0);
     assert.equal(clear.disabled, true);
     assert.equal(root.activeElement, root.querySelector('.close'));
     const reloaded = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
-    try { assert.equal(reloaded.root.querySelectorAll('.item').length, 0); }
+    try { assert.equal(reloaded.root.querySelectorAll('.body > .list > .item').length, 0); }
     finally { reloaded.dom.window.close(); }
   } finally { dom.window.close(); }
 });
@@ -493,7 +529,7 @@ test('failed clear preserves saved products and reports the failure', () => {
     w.Storage.prototype.setItem = () => { throw Error('QuotaExceededError'); };
     root.querySelector('.clear-list').click();
     assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
-    assert.equal(root.querySelectorAll('.item').length, 6);
+    assert.equal(root.querySelectorAll('.body > .list > .item').length, 6);
     assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
   } finally { dom.window.close(); }
 });
@@ -505,7 +541,7 @@ test('malformed FIFO storage is protected from overwrites', () => {
   const { dom, w, root } = setup(initial);
   try {
     root.querySelector('.fifo-button').click();
-    assert.equal(root.querySelector('.fifo-table select').disabled, true);
+    assert.equal(root.querySelector('.start-round').disabled, true);
     assert.equal(root.querySelector('.print-fifo').disabled, true);
     assert.equal(root.querySelector('.clear-list').disabled, true);
     assert.equal(w.localStorage.getItem('ov.vulcheck.v1'), initial['ov.vulcheck.v1']);
@@ -515,6 +551,7 @@ test('malformed FIFO storage is protected from overwrites', () => {
 test('FIFO export previews both categories, current edits and blank slots without printing the webpage', () => {
   const initial = fifoFixture(), data = JSON.parse(initial['ov.vulcheck.v1']);
   data.entries[0].product.name = '<img src=x onerror=alert(1)> Melk & yoghurt';
+  data.fifo = { zuivel: [{ article: '100000', fifo: true, names: 'Anne <Sam> & Jo' }], vvp: [{ article: '100001', fifo: false, names: '' }] };
   initial['ov.vulcheck.v1'] = JSON.stringify(data);
   const preview = new JSDOM('', { url: 'https://product.jumbo.com/' });
   let prints = 0;
@@ -525,12 +562,6 @@ test('FIFO export previews both categories, current edits and blank slots withou
     assert.equal(root.querySelector('.print-fifo').hidden, true);
     root.querySelector('.fifo-button').click();
     assert.equal(root.querySelector('.print-fifo').hidden, false);
-    const controls = category => root.querySelector(`[data-category="${category}"] tbody tr`).querySelectorAll('select,input');
-    change(w, controls('zuivel')[0], '100000');
-    change(w, controls('zuivel')[1], 'yes');
-    change(w, controls('zuivel')[2], 'Anne <Sam> & Jo', 'input');
-    change(w, controls('vvp')[0], '100001');
-    change(w, controls('vvp')[1], 'no');
     const before = w.localStorage.getItem('ov.vulcheck.v1');
     root.querySelector('.print-fifo').click();
     const doc = preview.window.document;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.6.1
+// @version      0.7.0
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -32,6 +32,7 @@
     if (p.eans.length > 30 || p.eans.some(e => typeof e !== 'string' || !/^\d{8,14}$/.test(e))) throw Error('Ongeldige barcode');
     const product = { article: p.article, name: str(p.name), size: str(p.size, 60), category: str(p.category, 100),
       eans: [...new Set(p.eans)], pack: str(p.pack, 30) };
+    if (p.location) product.location = str(p.location, 200);
     const url = safeUrl(p.url, true), image = safeUrl(p.image);
     if (url) product.url = url;
     if (image) product.image = image;
@@ -125,6 +126,7 @@
       size: labelled(/^(?:netto[- ]?inhoud|inhoud)\s*:\s*(.*)$/i) ||
         (numberIndex >= 0 ? header.slice(numberIndex + 2).find(line => /^\d[\d.,]*\s*(?:GR|G|KG|ML|CL|L|ST|STUKS?)\b/i.test(line)) || '' : ''),
       category: labelled(/^(?:presentatiegroep|categorie|locatie)\s*:\s*(.*)$/i) || labelled(/^locatie$/i),
+      location: header.find(line => /\bmeter\s+\d+.*\bplank\s+\d+/i.test(line)) || '',
       pack: labelled(/^collo[- ]?inhoud\s*:?\s*(.*)$/i),
       eans: /^\d{8,14}$/.test(ean) ? [ean] : [] });
   }
@@ -527,8 +529,9 @@
       .name{display:block;font-size:14px;font-weight:700;overflow-wrap:anywhere}.sub{display:block;font-size:13px;color:#707070;margin-top:3px}.remove{font-size:20px;color:#707070;margin-left:4px}.empty{padding:32px 0;color:#707070;font-size:14px}
       .toast{pointer-events:auto;position:fixed;bottom:calc(76px + env(safe-area-inset-bottom));right:16px;max-width:min(360px,calc(100vw - 32px));padding:12px 16px;background:#222;color:#fff;border-radius:4px;font-size:14px;box-shadow:0 2px 12px #0002}
       .nav{display:flex;gap:4px;min-width:0}.nav button{padding:10px 8px;min-height:44px;border-radius:4px;background:#f2f2f2;font-size:14px;white-space:nowrap}.nav button[aria-pressed="true"]{background:#ffcc00;font-weight:700}
-      dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px}.fifo-table th{text-align:left;padding:8px 4px;border-bottom:2px solid #ffcc00}.fifo-table th:first-child{width:43%}.fifo-table th:nth-child(2){width:25%}.fifo-table td{padding:10px 4px;border-bottom:1px solid #e9e9e9;vertical-align:top}
-      .fifo-table select,.fifo-table input{display:block;box-sizing:border-box;width:100%;min-width:0;height:44px;min-height:44px;max-height:44px;margin:0;padding:6px;border:1px solid #aaa;border-radius:4px;background:#fff;color:#222;font:inherit;font-size:16px;line-height:normal}.fifo-table select:focus-visible{outline:3px solid #222;outline-offset:2px}.fifo-table :disabled{opacity:.5}.fifo-help{font-size:14px;color:#666}
+      dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-help{font-size:14px;color:#666}
+      .round-primary,.round-no,.round-back{min-height:48px;padding:12px 18px;border-radius:6px;font-weight:700;background:#ffcc00}.round-primary:disabled{opacity:.5;cursor:default}.start-round,.resume-round{display:block;width:100%;margin:20px 0 12px}.resume-round{background:#f2f2f2}.round-back{display:block;margin:24px auto 16px;background:#f2f2f2;font-weight:400}
+      .round-page{max-width:540px;margin:0 auto;padding-top:20px;text-align:center}.round-filters{justify-content:center}.round-filters button{flex:1}.round-progress{font-size:14px;color:#666;margin:20px 0}.round-card{padding:24px 16px;background:#fafafa;border:1px solid #eee;border-radius:10px}.round-card img{width:120px;height:120px;object-fit:contain}.round-card h2{font-size:22px;margin:8px 0;overflow-wrap:anywhere}.round-card dl{margin:24px 0 0;text-align:left;display:grid;grid-template-columns:110px 1fr;gap:10px;font-size:14px}.round-card dt{color:#666}.round-card dd{margin:0;overflow-wrap:anywhere}.round-page h2:focus{outline:none}.round-page h3{font-size:20px;margin:24px 0 12px}.round-answers{display:flex;gap:12px}.round-answers button{flex:1;font-size:18px}.round-no{background:#fff;border:1px solid #bbb}.round-no[aria-pressed="true"]{border:2px solid #222;background:#f2f2f2}.round-names{margin-top:20px;text-align:left}.round-names label{display:block;font-size:14px;font-weight:700}.round-names input{width:100%;min-height:48px;border:1px solid #aaa;border-radius:5px;margin:8px 0 12px;padding:10px;font-size:16px}.round-names button{width:100%}
       /* Keep motion on stable containers: data refreshes must not replay every row. */
       @media (prefers-reduced-motion:no-preference){
         @keyframes panel-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
@@ -542,8 +545,6 @@
         button{transition:background-color 140ms ease,color 140ms ease,box-shadow 160ms ease,transform 140ms ease}
         button:enabled:active{transform:scale(.96)}
         .photo{transition:transform 180ms ease}
-        .fifo-table select,.fifo-table input{transition:border-color 140ms ease,background-color 140ms ease}
-        .fifo-table select:focus,.fifo-table input:focus{border-color:#8a7000;background-color:#fffdf2}
         @media (hover:hover) and (pointer:fine){
           .launch:hover{transform:translateY(-2px);box-shadow:0 5px 16px #0003}
           .launch:active{transform:translateY(0) scale(.96)}
@@ -706,80 +707,170 @@
     const fifoButton = button('Fifo check', () => showView('fifo'), 'fifo-button');
     nav.append(listButton, fifoButton);
     head.append(nav, headActions);
-    const fifoPage = el('div', undefined, 'fifo-page');
-    body.append(list, fifoPage); shell.append(head, body); dialog.append(shell);
+    const fifoPage = el('div', undefined, 'fifo-page'), roundPage = el('div', undefined, 'round-page');
+    body.append(list, fifoPage, roundPage); shell.append(head, body); dialog.append(shell);
     const toast = el('div', '', 'toast'); toast.hidden = true; toast.setAttribute('role', 'status');
     root.append(launch, quickSave, dialog, toast); document.body.append(host);
     let toastTimer;
     notify = message => { (dialog.open ? shell : root).append(toast); toast.textContent = message; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6500); };
     let listSignature = '';
     let fifoSignature = '';
+    let round = null, roundFilter = 'zuivel', roundSignature = '', roundCurrentKey = null, namesDraft = '', askingNames = false;
+    const categoryName = category => category === 'zuivel' ? 'Zuivel' : 'VVP';
+    const chosenRows = () => ['zuivel', 'vvp'].flatMap(category => fifo[category]
+      .filter(row => row.article).map(row => ({ ...row, category, key: category + ':' + row.article })));
+    function focusRound() {
+      const target = roundPage.querySelector('h2');
+      if (target) { target.tabIndex = -1; target.focus({ preventScroll: true }); }
+      body.scrollTop = 0;
+    }
+    function startRound() {
+      load();
+      const selected = chosenRows();
+      if (storageBroken || !selected.length) return;
+      const next = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
+        fifo[category].map(row => ({ ...row, fifo: null, names: '' }))]));
+      if (!save(entries, next)) return;
+      round = selected.map(({ category, article, key }) => ({ category, article, key }));
+      roundFilter = round[0].category; askingNames = false; namesDraft = ''; roundSignature = '';
+      showView('round'); focusRound();
+    }
+    function productDetails(product, container) {
+      if (product.image) {
+        const photo = el('img'); photo.src = product.image; photo.alt = ''; photo.referrerPolicy = 'no-referrer';
+        photo.addEventListener('error', () => photo.remove(), { once: true }); container.append(photo);
+      }
+      container.append(el('h2', product.name));
+      if (product.size) container.append(el('p', product.size, 'sub'));
+      const details = el('dl');
+      for (const [label, value] of [['Artikelnummer', product.article], ['Locatie', [product.category, product.location].filter(Boolean).join(' · ') || 'Niet bekend'], ['Collo inhoud', product.pack]]) {
+        if (value) details.append(el('dt', label), el('dd', value));
+      }
+      container.append(details);
+    }
+    function renderRound() {
+      if (view !== 'round' || !round) return;
+      const rows = chosenRows(), products = new Map(allProducts().map(p => [p.article, p]));
+      const active = round.map(item => rows.find(row => row.key === item.key)).filter(Boolean);
+      const pending = active.filter(row => row.fifo === null);
+      const current = pending.find(row => row.category === roundFilter);
+      if (roundCurrentKey !== (current?.key || null)) { askingNames = false; namesDraft = ''; roundCurrentKey = current?.key || null; }
+      const signature = JSON.stringify([storageBroken, active, [...products], roundFilter, askingNames]);
+      if (signature === roundSignature) return;
+      roundSignature = signature; roundPage.replaceChildren();
+      const filters = el('nav', undefined, 'nav round-filters'); filters.setAttribute('aria-label', 'FIFO categorie');
+      for (const category of ['zuivel', 'vvp']) {
+        const remaining = pending.filter(row => row.category === category).length;
+        const filter = button(categoryName(category) + ' · ' + remaining, () => {
+          roundFilter = category; askingNames = false; namesDraft = ''; renderRound(); focusRound();
+        });
+        filter.dataset.filter = category; filter.setAttribute('aria-pressed', String(roundFilter === category)); filters.append(filter);
+      }
+      roundPage.append(filters);
+      const progress = el('p', `${active.length - pending.length} van ${active.length} gecontroleerd`, 'round-progress');
+      progress.setAttribute('role', 'status'); roundPage.append(progress);
+      const back = button('Terug naar producten', () => showView('fifo'), 'round-back');
+      if (storageBroken) {
+        roundPage.append(el('h2', 'Opslag niet leesbaar'), el('p', 'Je antwoorden kunnen nu niet veilig worden opgeslagen.'), back); return;
+      }
+      if (!pending.length) {
+        roundPage.append(el('h2', active.length ? 'FIFO check afgerond!' : 'Geen producten meer in deze ronde'),
+          el('p', active.length ? 'Wil je de tabel printen of bewaren als PDF?' : 'Voeg producten toe om een nieuwe ronde te starten.'));
+        if (active.length) roundPage.append(button('Print / PDF', () => printButton.click(), 'round-primary round-print'));
+        roundPage.append(back); return;
+      }
+      if (!current) {
+        const other = roundFilter === 'zuivel' ? 'vvp' : 'zuivel';
+        roundPage.append(el('h2', categoryName(roundFilter) + ' klaar'),
+          button('Verder met ' + categoryName(other), () => { roundFilter = other; renderRound(); focusRound(); }, 'round-primary'), back); return;
+      }
+      const product = products.get(current.article);
+      const card = el('section', undefined, 'round-card'); card.dataset.article = current.article;
+      productDetails(product, card); roundPage.append(card);
+      const question = el('h3', 'FIFO gevuld?'); roundPage.append(question);
+      function answer(yes, names = '') {
+        load();
+        const row = fifo[current.category].find(row => row.article === current.article);
+        if (!row || row.fifo !== null) {
+          askingNames = false; namesDraft = ''; roundSignature = ''; render();
+          notify('Dit product is gewijzigd. De ronde is bijgewerkt.'); return;
+        }
+        const next = { ...fifo, [current.category]: fifo[current.category].map(row => row.article !== current.article ? row :
+          { ...row, fifo: yes, names: yes ? '' : names.trim() }) };
+        if (!save(entries, next)) return;
+        askingNames = false; namesDraft = ''; roundSignature = ''; render(); focusRound();
+      }
+      const answers = el('div', undefined, 'round-answers');
+      const yes = button('Ja', () => answer(true), 'round-primary round-yes');
+      const no = button('Nee', () => { askingNames = true; renderRound(); roundPage.querySelector('input')?.focus(); }, 'round-no');
+      no.setAttribute('aria-pressed', String(askingNames)); answers.append(yes, no); roundPage.append(answers);
+      if (askingNames) {
+        const form = el('form', undefined, 'round-names'), label = el('label', 'Wie heeft dit product gevuld?');
+        const input = el('input'); input.id = 'ov-round-names'; label.htmlFor = input.id;
+        input.type = 'text'; input.required = true; input.maxLength = 200; input.placeholder = 'Naam / namen'; input.value = namesDraft;
+        input.addEventListener('input', () => { namesDraft = input.value; input.setCustomValidity(''); });
+        const submit = button('Opslaan en verder', () => {}, 'round-primary'); submit.type = 'submit';
+        form.append(label, input, submit);
+        form.addEventListener('submit', event => {
+          event.preventDefault();
+          if (!input.value.trim()) { input.setCustomValidity('Vul minstens één naam in.'); input.reportValidity(); return; }
+          answer(false, input.value);
+        });
+        roundPage.append(form);
+      }
+      roundPage.append(back);
+    }
     function renderFifo() {
-      dialog.setAttribute('aria-label', view === 'fifo' ? 'Fifo check' : 'Mijn lijst');
-      dialog.classList.toggle('fifo-view', view === 'fifo');
-      printButton.hidden = view !== 'fifo'; printButton.disabled = storageBroken;
+      const isFifo = view !== 'list';
+      dialog.setAttribute('aria-label', view === 'round' ? 'FIFO ronde' : isFifo ? 'Fifo check' : 'Mijn lijst');
+      dialog.classList.toggle('fifo-view', isFifo);
+      printButton.hidden = !isFifo; printButton.disabled = storageBroken;
       clearButton.hidden = view !== 'list'; clearButton.disabled = storageBroken || !entries.length;
-      list.hidden = view !== 'list'; fifoPage.hidden = view !== 'fifo';
+      list.hidden = view !== 'list'; fifoPage.hidden = view !== 'fifo'; roundPage.hidden = view !== 'round';
       listButton.setAttribute('aria-pressed', String(view === 'list'));
-      fifoButton.setAttribute('aria-pressed', String(view === 'fifo'));
+      fifoButton.setAttribute('aria-pressed', String(isFifo));
+      if (view === 'round') { renderRound(); return; }
       if (view !== 'fifo') return;
-      const products = allProducts()
-        .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
-      const signature = JSON.stringify([storageBroken, fifo, products]);
+      const products = new Map(allProducts().map(p => [p.article, p]));
+      const signature = JSON.stringify([storageBroken, fifo, [...products], round]);
       if (signature === fifoSignature) return;
-      fifoSignature = signature;
-      fifoPage.replaceChildren();
-      if (storageBroken || !products.length) fifoPage.append(el('p', storageBroken ?
+      fifoSignature = signature; fifoPage.replaceChildren();
+      if (storageBroken || !chosenRows().length) fifoPage.append(el('p', storageBroken ?
         'Je opgeslagen gegevens kunnen niet worden gelezen.' :
         'Open een product en voeg het via het productmenu toe aan Zuivel FIFO of VVP FIFO.', 'fifo-help'));
       for (const category of ['zuivel', 'vvp']) {
-        const label = category === 'zuivel' ? 'Zuivel' : 'VVP';
-        const section = el('section', undefined, 'fifo-section'), heading = el('h2', label);
-        heading.id = 'fifo-' + category;
-        const table = el('table', undefined, 'fifo-table'); table.dataset.category = category;
-        table.setAttribute('aria-labelledby', heading.id);
-        const thead = el('thead'), header = el('tr'), tbody = el('tbody');
-        for (const text of ['Product', 'Fifo', 'Wie gevuld']) { const th = el('th', text); th.scope = 'col'; header.append(th); }
-        thead.append(header); table.append(thead, tbody);
-        fifo[category].forEach((row, index) => {
-          const tr = el('tr'), product = el('select'), status = el('select'), names = el('input');
-          const accessible = `${label}, rij ${index + 1}`;
-          product.setAttribute('aria-label', 'Product — ' + accessible);
-          status.setAttribute('aria-label', 'Fifo — ' + accessible);
-          names.setAttribute('aria-label', 'Wie gevuld — ' + accessible);
-          const option = (select, value, text) => { const o = el('option', text); o.value = value; select.append(o); };
-          option(product, '', 'Kies product…');
-          for (const p of products) {
-            if (p.article === row.article || !fifo[category].some(r => r.article === p.article))
-              option(product, p.article, `${p.name}${p.size ? ' · ' + p.size : ''}`);
-          }
-          product.value = row.article; product.disabled = storageBroken || !products.length;
-          option(status, '', '—'); option(status, 'yes', 'Ja'); option(status, 'no', 'Nee');
-          status.value = row.fifo === null ? '' : row.fifo ? 'yes' : 'no';
-          names.type = 'text'; names.maxLength = 200; names.placeholder = 'Naam / namen'; names.value = row.names;
-          status.disabled = names.disabled = storageBroken || !row.article;
-          function update(field, value) {
-            load();
-            if (fifo[category][index].article !== row.article) { fifoSignature = ''; render(); notify('Deze rij is gewijzigd. Probeer opnieuw.'); return; }
-            if (field === 'article' && value && fifo[category].some((r, i) => i !== index && r.article === value)) {
-              fifoSignature = ''; render(); return;
-            }
-            const next = { ...fifo, [category]: fifo[category].map((r, i) => i !== index ? r :
-              field === 'article' ? { ...emptyFifoRow(), article: value } : { ...r, [field]: value }) };
-            const saved = save(entries, next);
-            // Keep the text field and caret intact while typing.
-            if (saved && field === 'names') fifoSignature = JSON.stringify([storageBroken, fifo, products]);
-            else fifoSignature = '';
-            render();
-          }
-          product.addEventListener('change', () => update('article', product.value));
-          status.addEventListener('change', () => update('fifo', status.value === '' ? null : status.value === 'yes'));
-          names.addEventListener('input', () => update('names', names.value));
-          for (const control of [product, status, names]) { const td = el('td'); td.append(control); tr.append(td); }
-          tbody.append(tr);
-        });
-        section.append(heading, table); fifoPage.append(section);
+        const section = el('section', undefined, 'fifo-section'); section.dataset.category = category;
+        section.append(el('h2', categoryName(category)));
+        const selected = fifo[category].filter(row => row.article);
+        if (!selected.length) section.append(el('p', 'Nog geen producten gekozen.', 'fifo-help'));
+        const items = el('ul', undefined, 'list');
+        for (const row of selected) {
+          const product = products.get(row.article), item = el('li', undefined, 'item');
+          const text = el('div', undefined, 'product');
+          const description = el('div'); description.append(el('span', product.name, 'name'),
+            el('span', [product.article, product.size].filter(Boolean).join(' · '), 'sub')); text.append(description);
+          const remove = button('×', () => {
+            load(); const next = { ...fifo, [category]: fifo[category].map(r => r.article === row.article ? emptyFifoRow() : r) };
+            if (save(entries, next)) render();
+          }, 'remove');
+          remove.disabled = storageBroken; remove.setAttribute('aria-label', 'Verwijder uit ' + categoryName(category) + ': ' + product.name);
+          item.append(text, remove); items.append(item);
+        }
+        section.append(items); fifoPage.append(section);
       }
+      const rows = chosenRows();
+      if (rows.some(row => row.fifo === null) && (round || rows.some(row => row.fifo !== null))) {
+        fifoPage.append(button('Verder met FIFO check', () => {
+          load(); round = chosenRows().map(({ category, article, key }) => ({ category, article, key }));
+          roundFilter = chosenRows().find(row => row.fifo === null)?.category || 'zuivel';
+          askingNames = false; namesDraft = ''; roundSignature = '';
+          showView('round'); focusRound();
+        }, 'round-primary resume-round'));
+      }
+      const start = button('Start FIFO check', startRound, 'round-primary start-round');
+      start.disabled = storageBroken || !chosenRows().length;
+      fifoPage.append(start);
+      if (chosenRows().some(row => row.fifo !== null)) fifoPage.append(el('p', 'Een nieuwe ronde wist de vorige antwoorden. Je gekozen producten blijven bewaard.', 'fifo-help'));
     }
     function renderList() {
       const unique = new Map();
@@ -833,10 +924,14 @@
       // Enrich legacy entries when their product is revisited, retaining notes and dates.
       if (product && !storageBroken) {
         const url = safeUrl(location.href, true);
-        const needsUpdate = entries.some(e => e.product.article === product.article &&
-          ((url && e.product.url !== url) || (product.image && e.product.image !== product.image)));
-        if (needsUpdate) save(entries.map(e => e.product.article === product.article ?
-          { ...e, product: { ...e.product, ...(url ? { url } : {}), ...(product.image ? { image: product.image } : {}) } } : e));
+        const updates = { ...(url ? { url } : {}), ...(product.image ? { image: product.image } : {}),
+          ...(product.location ? { location: product.location } : {}), ...(product.category ? { category: product.category } : {}) };
+        const outdated = p => p.article === product.article && Object.entries(updates).some(([key, value]) => p[key] !== value);
+        if (entries.some(e => outdated(e.product)) || fifoProducts.some(outdated)) {
+          const existing = allProducts().find(p => p.article === product.article);
+          save(entries.map(e => outdated(e.product) ? { ...e, product: { ...e.product, ...updates } } : e),
+            fifo, existing ? [{ ...existing, ...updates }] : []);
+        }
       }
       if (displayedArticle !== (product?.article || null)) closeProductMenu();
       displayedArticle = product?.article || null;
