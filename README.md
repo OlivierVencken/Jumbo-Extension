@@ -9,7 +9,7 @@ Edit **`src/`**, not the generated files in `dist/`.
 
 | Command | Result |
 | --- | --- |
-| `npm run build` | Build the minified, standalone **`dist/jumbo-checklist.user.js`** for production. |
+| `npm run build` | Build the minified, standalone **`dist/jumbo-checklist.user.js`** and matching **`dist/jumbo-checklist.meta.js`** update manifest. |
 | `npm run build:dev` | Build readable `dist/jumbo-checklist.dev.user.js` with an inline source map. |
 | `npm run dev` | Watch source and metadata changes and rebuild the development file automatically. |
 | `npm run preview` | Build the development file and serve the local mobile fixture. |
@@ -21,8 +21,9 @@ The fixture contains synthetic product data and makes no Jumbo requests. For
 testing on Jumbo, install the development file in Userscripts and reload the page
 after copying a rebuild; keep only one copy enabled.
 
-Before releasing, update `src/metadata.txt`, run `npm test`, and distribute only
-`dist/jumbo-checklist.user.js`. All generated output lives in `dist/` and is
+Before releasing, increase the version in `src/metadata.txt`, run `npm test`, and
+follow the release instructions below. Install only `dist/jumbo-checklist.user.js`;
+the `.meta.js` file is for update checks. All generated output lives in `dist/` and is
 ignored by Git; run the build after a fresh checkout. Both builds embed
 the JavaScript and styles in a single file, preserve the userscript header at the
 very top, and need no runtime dependencies, external imports, or build server.
@@ -55,10 +56,67 @@ remain compatible with previous releases.
 
 ## Update on iPhone
 
-1. Run `npm run build`, then copy `dist/jumbo-checklist.user.js` into the folder used by Userscripts, replacing the existing file. Keep only one enabled copy.
+Version 0.9.0 adds Userscripts' native remote-update metadata. The extension checks
+the published version and downloads the replacement script from GitHub when an
+update is applied. Updates use the latest published release, not untested commits
+on `main`. Development builds have no update links.
+
+**iOS limitation:** this is manager-driven updating, not a silent in-script
+self-updater. Userscripts currently has automatic update checks temporarily
+disabled ([release notes](https://github.com/quoid/userscripts/releases)). Use
+the update control in its Safari popup to check and apply updates. The script
+itself cannot overwrite the installed file in the extension's folder; the
+extension owns that operation. Supported metadata and installation methods are
+documented in the [Userscripts documentation](https://github.com/quoid/userscripts#metadata).
+
+One-time setup (after publishing the first release below):
+
+1. On iPhone, open the [latest installation file](https://github.com/OlivierVencken/Jumbo-Extension/releases/latest/download/jumbo-checklist.user.js) in Safari, open the Userscripts extension popup, and follow its install/replace prompt. Alternatively, run `npm run build` and copy `dist/jumbo-checklist.user.js` into the Userscripts folder once, replacing the existing file. Older installed versions need this step because they have no update links. Keep only one enabled copy.
 2. Reload `https://product.jumbo.com/` in Safari and open a product.
 3. Tap the product icon in the top-right corner, then choose Mijn lijst, Zuivel FIFO, or VVP FIFO. Each option independently adds or removes the current product.
 4. Open the checklist icon beside the account icon to see **Mijn lijst**. On pages without an account icon, it appears at the bottom-right.
+
+For subsequent releases, open Userscripts in Safari, check for updates and apply
+the available Mijn vulcheck update, then reload Jumbo. If the update control fails,
+install/replace from the same installation link. Saved checklist data stays in
+Safari and is preserved when replacing the script. Without a connection, the
+already installed script continues to work.
+
+### Publishing updates
+
+The repository and release assets must be publicly readable without signing in;
+private repository authentication is not configured. Enable GitHub Actions for
+this repository. No personal access token is needed: the workflow uses its
+repository-scoped `GITHUB_TOKEN` with release-write permission.
+
+1. Increase `@version` in `src/metadata.txt` for every release (use `major.minor.patch`).
+2. Run `npm test`, commit the source and workflow, and push the commit.
+3. Tag that commit with the matching version and push the tag. For this release:
+
+   ```sh
+   git tag v0.9.0
+   git push origin v0.9.0
+   ```
+
+The **Release userscript** GitHub Action checks the tag against the metadata,
+installs dependencies, runs all tests, and uploads both production assets to a
+draft release before publishing it as latest. A failing build/test does not
+publish an update. The installation and update links become usable only after
+the first successful release. The workflow does not publish ordinary commits.
+Only publish versions greater than the existing latest release; to roll back a
+bug, release the reverted code with a new, higher version number.
+
+If publication fails after creating a draft, inspect the failed Action, delete
+that incomplete draft release (keep the tag), and rerun the workflow. Do not
+manually publish a draft missing either asset.
+
+On-device verification: install one release, publish another with a higher
+version, apply the update in Userscripts, verify the installed version and reload
+Jumbo. Check that Mijn lijst and FIFO data remain present. GitHub publication
+and real iPhone updating require this external check; local tests verify the
+generated artifacts and release-version guard.
+
+## Using the checklist
 
 Tap a selected menu option again to remove the product from that destination. The remove button in Mijn lijst only removes it from that list. Reloading preserves the list, and products remain visible across days. Existing version 0.1.0 data remains compatible.
 

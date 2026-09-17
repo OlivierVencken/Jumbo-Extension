@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.8.0
+// @version      0.9.0
+// @updateURL    https://github.com/OlivierVencken/Jumbo-Extension/releases/latest/download/jumbo-checklist.meta.js
+// @downloadURL  https://github.com/OlivierVencken/Jumbo-Extension/releases/latest/download/jumbo-checklist.user.js
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
