@@ -280,8 +280,6 @@ function mount() {
       filter.dataset.filter = category; filter.setAttribute('aria-pressed', String(roundFilter === category)); filters.append(filter);
     }
     roundPage.append(filters);
-    const progress = el('p', `${active.length - pending.length} van ${active.length} gecontroleerd`, 'round-progress');
-    progress.setAttribute('role', 'status'); roundPage.append(progress);
     const back = button('Terug naar producten', () => showView('fifo'), 'round-back');
     if (storageBroken) {
       roundPage.append(el('h2', 'Opslag niet leesbaar'), el('p', 'Je antwoorden kunnen nu niet veilig worden opgeslagen.'), back); return;
@@ -360,9 +358,7 @@ function mount() {
     const signature = JSON.stringify([storageBroken, fifo, [...products], roundInProgress]);
     if (signature === fifoSignature) return;
     fifoSignature = signature; fifoPage.replaceChildren();
-    if (storageBroken || !chosenRows().length) fifoPage.append(el('p', storageBroken ?
-      'Je opgeslagen gegevens kunnen niet worden gelezen.' :
-      'Open een product en voeg het via het productmenu toe aan Zuivel FIFO of VVP FIFO.', 'fifo-help'));
+    if (storageBroken) fifoPage.append(el('p', 'Je opgeslagen gegevens kunnen niet worden gelezen.', 'fifo-help'));
     for (const category of ['zuivel', 'vvp']) {
       const section = el('section', undefined, 'fifo-section'); section.dataset.category = category;
       section.append(el('h2', categoryName(category)));
@@ -383,7 +379,6 @@ function mount() {
       }
       section.append(items); fifoPage.append(section);
     }
-    const rows = chosenRows();
     if (roundInProgress) {
       fifoPage.append(button('Verder met FIFO check', () => {
         load(); roundResult = null; round = chosenRows().map(({ category, article, key }) => ({ category, article, key }));
@@ -395,7 +390,6 @@ function mount() {
     const start = button('Start FIFO check', startRound, 'round-primary start-round');
     start.disabled = storageBroken || roundInProgress || !chosenRows().length;
     fifoPage.append(start);
-    if (lastRound && !rows.length) fifoPage.append(el('p', 'Je FIFO-producten zijn leeggemaakt. Met Print / PDF kun je de laatste afgeronde ronde nog printen.', 'fifo-help'));
     if (roundInProgress) fifoPage.append(el('p', 'Er is al een FIFO-ronde bezig. Rond deze eerst af voordat je een nieuwe start.', 'fifo-help'));
   }
   function renderList() {

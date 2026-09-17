@@ -540,7 +540,8 @@ test('FIFO round shows selected products, filters categories, collects names onl
     const interrupted = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
     try {
       interrupted.root.querySelector('.fifo-button').click(); interrupted.root.querySelector('.resume-round').click();
-      assert.match(interrupted.root.querySelector('.round-progress').textContent, /1 van 2/);
+      assert.equal(interrupted.stored().fifo.zuivel[0].fifo, null);
+      assert.equal(interrupted.stored().fifo.vvp[0].fifo, false);
       interrupted.root.querySelector('.round-yes').click();
       assert.equal(interrupted.stored().lastRound.fifo.vvp[0].names, 'Anne, Sam');
       assert.ok(interrupted.root.querySelector('.round-print'));
