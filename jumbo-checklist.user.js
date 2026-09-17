@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.7.1
+// @version      0.7.2
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -242,7 +242,7 @@
   const decoder = createDecoder();
   let current = null, generation = 0, entries = [], storageBroken = false;
   let fifo = parseFifo(undefined, new Set());
-  let fifoProducts = [], lastRound = null;
+  let fifoProducts = [], lastRound = null, roundInProgress = false;
   function parseRoundReport(report) {
     if (report == null) return null;
     if (!Array.isArray(report.products) || report.products.length > 10 ||
@@ -286,12 +286,16 @@
       const nextFifo = parseFifo(data?.fifo, new Set(catalog.keys()));
       const selected = new Set(Object.values(nextFifo).flat().map(r => r.article));
       const nextReport = parseRoundReport(data?.lastRound);
+      if (data?.roundInProgress !== undefined && typeof data.roundInProgress !== 'boolean') throw Error('Ongeldige FIFO-ronde.');
+      const rows = Object.values(nextFifo).flat().filter(row => row.article);
+      roundInProgress = rows.length > 0 && (data?.roundInProgress ??
+        (rows.some(row => row.fifo !== null) && rows.some(row => row.fifo === null)));
       lastRound = nextReport; entries = next; fifo = nextFifo; fifoProducts = [...catalog.values()].filter(p => selected.has(p.article));
       storageBroken = false;
     } catch { storageBroken = true; }
   }
   load();
-  function save(next, nextFifo = fifo, extraProducts = [], report = lastRound) {
+  function save(next, nextFifo = fifo, extraProducts = [], report = lastRound, inProgress = roundInProgress) {
     if (storageBroken) { notify('Opslag niet leesbaar. Bestaande gegevens worden niet overschreven.'); return false; }
     try {
       const catalog = new Map([...allProducts(), ...next.map(e => e.product), ...extraProducts.map(parseProduct)].map(p => [p.article, p]));
@@ -299,8 +303,9 @@
       const selected = new Set(Object.values(cleanedFifo).flat().map(r => r.article));
       const nextProducts = [...catalog.values()].filter(p => selected.has(p.article));
       const nextReport = parseRoundReport(report);
-      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo, fifoProducts: nextProducts, lastRound: nextReport }));
-      lastRound = nextReport; entries = next; fifo = cleanedFifo; fifoProducts = nextProducts;
+      const nextInProgress = Boolean(inProgress && nextProducts.length);
+      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo, fifoProducts: nextProducts, lastRound: nextReport, roundInProgress: nextInProgress }));
+      roundInProgress = nextInProgress; lastRound = nextReport; entries = next; fifo = cleanedFifo; fifoProducts = nextProducts;
       return true;
     } catch { notify('Opslaan mislukt. Maak ruimte vrij of controleer Safari-opslag.'); return false; }
   }
@@ -740,11 +745,12 @@
     }
     function startRound() {
       load();
+      if (roundInProgress) { render(); notify('Er is al een FIFO-ronde bezig. Kies Verder met FIFO check.'); return; }
       const selected = chosenRows();
       if (storageBroken || !selected.length) return;
       const next = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
         fifo[category].map(row => ({ ...row, fifo: null, names: '' }))]));
-      if (!save(entries, next)) return;
+      if (!save(entries, next, [], lastRound, true)) return;
       roundResult = null;
       round = selected.map(({ category, article, key }) => ({ category, article, key }));
       roundFilter = round[0].category; askingNames = false; namesDraft = ''; roundSignature = '';
@@ -822,7 +828,7 @@
           const cleared = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
             next[category].map(row => keys.has(category + ':' + row.article) ? emptyFifoRow() : row)]));
           // Archive results and clear selections together: a failed write preserves the round.
-          if (!save(entries, cleared, [], report)) return;
+          if (!save(entries, cleared, [], report, false)) return;
           roundResult = lastRound;
         } else if (!save(entries, next)) return;
         askingNames = false; namesDraft = ''; roundSignature = ''; render(); focusRound();
@@ -859,7 +865,7 @@
       if (view === 'round') { renderRound(); return; }
       if (view !== 'fifo') return;
       const products = new Map(allProducts().map(p => [p.article, p]));
-      const signature = JSON.stringify([storageBroken, fifo, [...products], round]);
+      const signature = JSON.stringify([storageBroken, fifo, [...products], roundInProgress]);
       if (signature === fifoSignature) return;
       fifoSignature = signature; fifoPage.replaceChildren();
       if (storageBroken || !chosenRows().length) fifoPage.append(el('p', storageBroken ?
@@ -886,7 +892,7 @@
         section.append(items); fifoPage.append(section);
       }
       const rows = chosenRows();
-      if (rows.some(row => row.fifo === null) && (round || rows.some(row => row.fifo !== null))) {
+      if (roundInProgress) {
         fifoPage.append(button('Verder met FIFO check', () => {
           load(); roundResult = null; round = chosenRows().map(({ category, article, key }) => ({ category, article, key }));
           roundFilter = chosenRows().find(row => row.fifo === null)?.category || 'zuivel';
@@ -895,10 +901,10 @@
         }, 'round-primary resume-round'));
       }
       const start = button('Start FIFO check', startRound, 'round-primary start-round');
-      start.disabled = storageBroken || !chosenRows().length;
+      start.disabled = storageBroken || roundInProgress || !chosenRows().length;
       fifoPage.append(start);
       if (lastRound && !rows.length) fifoPage.append(el('p', 'Je FIFO-producten zijn leeggemaakt. Met Print / PDF kun je de laatste afgeronde ronde nog printen.', 'fifo-help'));
-      if (chosenRows().some(row => row.fifo !== null)) fifoPage.append(el('p', 'Een nieuwe ronde wist de vorige antwoorden. Je gekozen producten blijven bewaard.', 'fifo-help'));
+      if (roundInProgress) fifoPage.append(el('p', 'Er is al een FIFO-ronde bezig. Rond deze eerst af voordat je een nieuwe start.', 'fifo-help'));
     }
     function renderList() {
       const unique = new Map();

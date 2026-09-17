@@ -502,6 +502,40 @@ test('FIFO round cannot advance after failed writes and can resume after returni
   } finally { w.close(); }
 });
 
+test('an active round blocks restarting before any answer, across reloads, and from stale controls', () => {
+  const { w, root, stored } = setup();
+  try {
+    root.querySelector('[data-destination="zuivel"]').click();
+    root.querySelector('[data-destination="vvp"]').click();
+    root.querySelector('.fifo-button').click();
+    const staleStart = root.querySelector('.start-round');
+    staleStart.click();
+    assert.equal(stored().roundInProgress, true);
+    root.querySelector('.round-back').click();
+    assert.equal(root.querySelector('.start-round').disabled, true);
+    assert.ok(root.querySelector('.resume-round'));
+    const reloaded = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
+    try {
+      reloaded.root.querySelector('.fifo-button').click();
+      assert.equal(reloaded.root.querySelector('.start-round').disabled, true);
+      reloaded.root.querySelector('.resume-round').click();
+      assert.ok(reloaded.root.querySelector('.round-yes'));
+    } finally { reloaded.w.close(); }
+    root.querySelector('.resume-round').click();
+    root.querySelector('.round-yes').click();
+    const before = JSON.stringify(stored());
+    staleStart.dispatchEvent(new w.Event('click'));
+    assert.equal(JSON.stringify(stored()), before);
+    assert.equal(stored().fifo.zuivel[0].fifo, true);
+    root.querySelector('[data-filter="vvp"]').click();
+    root.querySelector('.round-yes').click();
+    assert.equal(stored().roundInProgress, false);
+    root.querySelector('.round-back').click();
+    root.querySelector('[data-destination="zuivel"]').click();
+    assert.equal(root.querySelector('.start-round').disabled, false);
+  } finally { w.close(); }
+});
+
 test('FIFO overview removes only the chosen category and disables start when empty', () => {
   const { w, root, stored } = setup();
   try {
