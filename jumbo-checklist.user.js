@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.5.7
+// @version      0.5.8
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -503,7 +503,7 @@
       :host{font-family:var(--list-font,Arial,sans-serif);color:#222;font-size:16px;line-height:1.4;color-scheme:light}
       *{box-sizing:border-box}[hidden]{display:none!important}button,input{font:inherit}button,a,input{touch-action:manipulation}
       button{cursor:pointer;color:inherit;border:0}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #222;outline-offset:3px}
-      .launch{pointer-events:auto;margin:16px 16px calc(16px + env(safe-area-inset-bottom));min-height:44px;padding:10px 18px;background:#ffcc00;border-radius:6px;font-weight:700;box-shadow:0 2px 10px #0002}
+      .launch{pointer-events:auto;margin:16px 16px calc(16px + env(safe-area-inset-bottom));width:44px;height:44px;display:grid;place-items:center;padding:10px;background:#ffcc00;border-radius:6px;box-shadow:0 2px 10px #0002}
       .save-product{pointer-events:auto;position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));width:44px;height:44px;display:grid;place-items:center;cursor:pointer}
       .save-product input{width:26px;height:26px;margin:0;accent-color:#ffcc00;cursor:pointer;box-shadow:0 0 0 2px #fff;border-radius:3px}.save-product input:disabled{cursor:wait}
       dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,400px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#fff;color:#222;box-shadow:-4px 0 24px #0002}
@@ -568,7 +568,24 @@
       svg.append(shape); control.replaceChildren(svg);
     }
     let view = 'list';
-    const launch = button('Mijn lijst', () => { view = 'list'; load(); render(); dialog.showModal(); head.focus({ preventScroll: true }); }, 'launch');
+    const launch = button('', () => { view = 'list'; load(); render(); dialog.showModal(); head.focus({ preventScroll: true }); }, 'launch');
+    launch.id = 'ov-list-launch';
+    launch.setAttribute('aria-haspopup', 'dialog');
+    setIcon(launch, 'Mijn lijst', 'M3 6l1.5 1.5L7 4 M10 6h11 M3 13l1.5 1.5L7 11 M10 13h11 M3 20l1.5 1.5L7 18 M10 20h11');
+    // Use the site's visual classes, without copying Mendix action hooks or logout behavior.
+    function placeLaunch() {
+      const account = [...document.querySelectorAll('button[data-button-id="p.Producten.Producten_Home.actionButton7"], button.logout-btn')]
+        .find(control => control.querySelector('.icon-person') && control.getClientRects().length &&
+          !control.closest('[hidden], [aria-hidden="true"]') && getComputedStyle(control).visibility !== 'hidden');
+      if (account) {
+        const classes = 'btn btn-tertiary btn-icon-only spacing-outer-right-none btn-default';
+        if (launch.className !== classes) launch.className = classes;
+        if (launch.nextElementSibling !== account) account.before(launch);
+      } else {
+        if (launch.className !== 'launch') launch.className = 'launch';
+        if (launch.parentNode !== root) root.prepend(launch);
+      }
+    }
     const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
     quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product');
     quickSave.append(quickCheck); quickSave.hidden = true;
@@ -722,7 +739,8 @@
           p.url ||= entry.product.url; p.image ||= entry.product.image;
         }
       }
-      launch.textContent = unique.size ? 'Mijn lijst · ' + unique.size : 'Mijn lijst';
+      const launchLabel = unique.size ? 'Mijn lijst · ' + unique.size : 'Mijn lijst';
+      launch.setAttribute('aria-label', launchLabel); launch.title = launchLabel;
       const signature = JSON.stringify([storageBroken, [...unique.values()]]);
       if (signature === listSignature) return;
       listSignature = signature;
@@ -783,6 +801,7 @@
     let scanTimer;
     let lastPage = '';
     function scanPage() {
+      placeLaunch();
       refreshPage();
       const signature = JSON.stringify([location.href, activeProduct(), day()]);
       if (signature !== lastPage) { lastPage = signature; render(); }
@@ -797,6 +816,7 @@
     window.addEventListener('hashchange', scanPage);
     // Also catch pushState routing and date changes, without patching Jumbo's router.
     setInterval(() => { if (!document.hidden) scanPage(); }, 1000);
+    placeLaunch();
     render();
   }
   if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount, { once: true });
