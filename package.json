@@ -6,7 +6,7 @@
     "build:dev": "node scripts/build.mjs --dev",
     "dev": "node scripts/build.mjs --watch",
     "pretest": "npm run build",
-    "test": "node --test tests",
+    "test": "node --test",
     "preview": "npm run build:dev && node tests/preview.cjs --dev"
   },
   "devDependencies": {

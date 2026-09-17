@@ -110,6 +110,10 @@ If publication fails after creating a draft, inspect the failed Action, delete
 that incomplete draft release (keep the tag), and rerun the workflow. Do not
 manually publish a draft missing either asset.
 
+If a failure requires a code fix, rerunning the old tag will still use the old
+code. Commit the fix with a higher metadata version, then push a matching new
+tag (for example, `v0.9.1` after a failed `v0.9.0`).
+
 On-device verification: install one release, publish another with a higher
 version, apply the update in Userscripts, verify the installed version and reload
 Jumbo. Check that Mijn lijst and FIFO data remain present. GitHub publication
