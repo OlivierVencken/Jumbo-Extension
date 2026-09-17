@@ -1,0 +1,11 @@
+// ==UserScript==
+// @name         Mijn vulcheck
+// @namespace    olivier.vulcheck
+// @version      0.8.0
+// @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
+// @match        https://product.jumbo.com/*
+// @run-at       document-start
+// @inject-into  page
+// @grant        none
+// @noframes
+// ==/UserScript==

@@ -2,10 +2,11 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const bundle = process.argv.includes('--dev') ? '../dist/jumbo-checklist.dev.user.js' : '../dist/jumbo-checklist.user.js';
 http.createServer((req, res) => {
   if (req.url === '/userscript.js') {
     res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
-    return res.end(fs.readFileSync(path.join(__dirname, '../jumbo-checklist.user.js')));
+    return res.end(fs.readFileSync(path.join(__dirname, bundle)));
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html><html lang="nl"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vulcheck test fixture</title>

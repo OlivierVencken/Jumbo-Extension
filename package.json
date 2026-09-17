@@ -2,10 +2,16 @@
   "name": "jumbo-vulcheck-userscript",
   "private": true,
   "scripts": {
-    "test": "node --test tests/checklist.test.cjs"
+    "build": "node scripts/build.mjs",
+    "build:dev": "node scripts/build.mjs --dev",
+    "dev": "node scripts/build.mjs --watch",
+    "pretest": "npm run build",
+    "test": "node --test tests",
+    "preview": "npm run build:dev && node tests/preview.cjs --dev"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.9",
+    "esbuild": "0.28.2",
     "jsdom": "26.1.0"
   }
 }

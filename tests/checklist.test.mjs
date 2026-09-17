@@ -1,12 +1,70 @@
+import { createRequire } from 'node:module';
+import * as core from '../src/core.mjs';
+const require = createRequire(import.meta.url);
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { JSDOM, VirtualConsole } = require('jsdom');
-const { productFromText, isProductPage } = require('../jumbo-checklist.user.js');
-const source = fs.readFileSync(require.resolve('../jumbo-checklist.user.js'), 'utf8');
+const { productFromText, isProductPage } = core;
+const source = fs.readFileSync(require.resolve('../dist/jumbo-checklist.user.js'), 'utf8');
 const url = 'https://product.jumbo.com/p/artikel/1f4a41b7-60ad-4cd0-b474-6c94dda7aab9';
 // Text and order transcribed from the user's product-detail screenshot.
 const fusilli = `717144\nJUMBO FUSILLI\n1\n15\n500 GR\nIn assortiment\nLocatie\nPASTA\nmeter 2, plank 7, positie 3\nEigenschappen\nCollo inhoud\n12 stuks\nEAN\n8718452931859\nBeschikbaarheid\nIn mijn assortiment\n19-01-2026 t/m 31-12-9999`;
+
+test('production bundle mounts at document-start and ignores duplicate injection', () => {
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url, runScripts: 'outside-only' });
+  const w = dom.window;
+  try {
+    w.document.body.remove();
+    w.eval(source);
+    const hookedOpen = w.XMLHttpRequest.prototype.open;
+    w.eval(source);
+    assert.equal(w.XMLHttpRequest.prototype.open, hookedOpen);
+    w.document.documentElement.append(w.document.createElement('body'));
+    w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+    assert.equal(w.document.querySelectorAll('#ov-vulcheck').length, 1);
+    w.eval(source);
+    assert.equal(w.document.querySelectorAll('#ov-vulcheck').length, 1);
+  } finally { w.close(); }
+});
+
+test('unchanged storage reuses list rows, while external changes and corruption are detected', () => {
+  const { w, root, listAction, stored } = setup();
+  try {
+    listAction.click();
+    const row = root.querySelector('.body > .list > .item');
+    root.querySelector('.launch').click();
+    assert.equal(root.querySelector('.body > .list > .item'), row);
+    const data = stored();
+    data.entries[0].product.name = 'Updated in another tab';
+    w.localStorage.setItem('ov.vulcheck.v1', JSON.stringify(data));
+    w.dispatchEvent(new w.StorageEvent('storage', { key: 'ov.vulcheck.v1' }));
+    assert.match(root.querySelector('.body > .list').textContent, /Updated in another tab/);
+    const valid = w.localStorage.getItem('ov.vulcheck.v1');
+    w.localStorage.setItem('ov.vulcheck.v1', '{broken');
+    w.dispatchEvent(new w.StorageEvent('storage', { key: 'ov.vulcheck.v1' }));
+    assert.equal(listAction.disabled, true);
+    w.localStorage.setItem('ov.vulcheck.v1', valid);
+    w.dispatchEvent(new w.StorageEvent('storage', { key: 'ov.vulcheck.v1' }));
+    assert.equal(listAction.disabled, false);
+    w.localStorage.clear();
+    w.dispatchEvent(new w.StorageEvent('storage', { key: null }));
+    assert.equal(root.querySelectorAll('.body > .list > .item').length, 0);
+  } finally { w.close(); }
+});
+
+test('search routes skip product text extraction', async () => {
+  const { w, tick } = setup();
+  try {
+    let reads = 0;
+    Object.defineProperty(w.HTMLElement.prototype, 'innerText', { configurable: true, get() { reads++; return this.textContent; } });
+    // The setup body has its own getter. Count heading extraction instead.
+    w.history.pushState({}, '', '/');
+    w.document.querySelector('main').innerHTML = '<h1>Search results</h1>';
+    await tick();
+    assert.equal(reads, 0);
+  } finally { w.close(); }
+});
 
 test('reads the screenshot layout without an article-number label or semantic title', () => {
   assert.deepEqual(productFromText(fusilli, ['Eigenschappen', 'Beschikbaarheid'], url), {
@@ -261,7 +319,7 @@ test('older products stay visible across days, deduplicate, and acquire links on
 });
 
 test('stored links reject scripts and unrelated product destinations', () => {
-  const { parseProduct, parseBackup } = require('../jumbo-checklist.user.js');
+  const { parseProduct, parseBackup } = core;
   const p = productFromText(fusilli, [], url);
   assert.equal(parseProduct({ ...p, url: 'javascript:alert(1)', image: 'data:text/html,bad' }).url, undefined);
   assert.equal(parseProduct({ ...p, url: 'https://example.com/p/artikel/123' }).url, undefined);
@@ -281,7 +339,7 @@ function change(w, element, value, event = 'change') {
 }
 
 test('greeting detection reads visible names, including nested text, and ignores inputs and hidden greetings', () => {
-  const { readGreetingName } = require('../jumbo-checklist.user.js');
+  const { readGreetingName } = core;
   const { dom, w } = setup();
   try {
     for (const [html, expected] of [
