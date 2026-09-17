@@ -23,6 +23,14 @@ test('does not treat an unlabelled search result, UUID, price or EAN as an artic
   assert.equal(isProductPage('https://product.jumbo.com/'), false);
 });
 
+test('extracts precise shelf location across lines and inside product details', () => {
+  const text = fusilli.replace('meter 2, plank 7, positie 3', '')
+    .replace('Eigenschappen', 'Eigenschappen\nMeter:\n2\nPlank\n7\nPositie:\n3');
+  const product = productFromText(text, ['Eigenschappen', 'Beschikbaarheid'], url);
+  assert.equal(product.category, 'PASTA');
+  assert.equal(product.location, 'meter 2, plank 7, positie 3');
+});
+
 test('also supports labelled article fields and tab-separated properties', () => {
   const p = productFromText('Artikelnummer: 123456\nOmschrijving: Melk\nEAN\t8712345678901');
   assert.equal(p.article, '123456');
@@ -443,7 +451,7 @@ test('FIFO round shows selected products, filters categories, collects names onl
       interrupted.root.querySelector('.fifo-button').click(); interrupted.root.querySelector('.resume-round').click();
       assert.match(interrupted.root.querySelector('.round-progress').textContent, /1 van 2/);
       interrupted.root.querySelector('.round-yes').click();
-      assert.equal(interrupted.stored().fifo.vvp[0].names, 'Anne, Sam');
+      assert.equal(interrupted.stored().lastRound.fifo.vvp[0].names, 'Anne, Sam');
       assert.ok(interrupted.root.querySelector('.round-print'));
     } finally { interrupted.w.close(); }
 
@@ -451,16 +459,27 @@ test('FIFO round shows selected products, filters categories, collects names onl
     root.querySelector('[data-filter="zuivel"]').click();
     assert.equal(root.querySelector('.round-names'), null);
     root.querySelector('.round-yes').click();
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+    assert.deepEqual(stored().lastRound.fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
     assert.match(root.querySelector('.round-page').textContent, /FIFO check afgerond/);
     root.querySelector('.round-print').click();
     assert.match(preview.window.document.querySelector('tbody').textContent, /Anne, Sam/);
-    const second = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
-    try { assert.equal(second.stored().fifo.vvp[0].names, 'Anne, Sam'); } finally { second.w.close(); }
-    root.querySelector('.round-back').click(); root.querySelector('.start-round').click();
+    const second = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) }, w => { w.open = () => preview.window; });
+    try {
+      assert.equal(second.stored().lastRound.fifo.vvp[0].names, 'Anne, Sam');
+      assert.equal(second.stored().fifo.zuivel[0].article, '');
+      second.root.querySelector('.fifo-button').click();
+      assert.equal(second.root.querySelector('.start-round').disabled, true);
+      second.root.querySelector('.print-fifo').click();
+      assert.match(preview.window.document.querySelector('tbody').textContent, /Anne, Sam/);
+    } finally { second.w.close(); }
+    root.querySelector('.round-back').click();
+    assert.equal(root.querySelector('.start-round').disabled, true);
+    assert.equal(root.querySelectorAll('.fifo-page .item').length, 0);
+    assert.deepEqual(stored().fifoProducts, []);
+    assert.equal(root.querySelector('[data-destination="zuivel"]').getAttribute('aria-pressed'), 'false');
     assert.equal(stored().fifo.vvp[0].fifo, null);
     assert.equal(stored().fifo.vvp[0].names, '');
-    assert.equal(stored().fifo.zuivel[0].article, '717144');
+    assert.equal(stored().fifo.zuivel[0].article, '');
     assert.deepEqual(stored().entries, []);
   } finally { w.close(); preview.window.close(); }
 });
@@ -479,7 +498,7 @@ test('FIFO round cannot advance after failed writes and can resume after returni
     w.Storage.prototype.setItem = originalSet;
     root.querySelector('.round-back').click(); root.querySelector('.resume-round').click();
     root.querySelector('.round-no').click(); root.querySelector('.round-yes').click();
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+    assert.deepEqual(stored().lastRound.fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
   } finally { w.close(); }
 });
 
@@ -505,11 +524,10 @@ test('clearing the list preserves independent FIFO selections', () => {
     root.querySelector('.fifo-button').click();
     assert.equal(clear.hidden, true);
     root.querySelector('[data-destination="zuivel"]').click();
-    root.querySelector('.start-round').click(); root.querySelector('.round-yes').click();
     root.querySelector('.nav button').click();
     clear.click();
     assert.deepEqual(stored().entries, []);
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: true, names: '' });
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '717144', fifo: null, names: '' });
     assert.equal(stored().fifoProducts[0].article, '717144');
     assert.equal((listAction.getAttribute('aria-pressed') === 'true'), false);
     assert.equal(root.querySelectorAll('.body > .list > .item').length, 0);

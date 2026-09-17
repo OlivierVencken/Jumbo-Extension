@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.7.0
+// @version      0.7.1
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -126,7 +126,10 @@
       size: labelled(/^(?:netto[- ]?inhoud|inhoud)\s*:\s*(.*)$/i) ||
         (numberIndex >= 0 ? header.slice(numberIndex + 2).find(line => /^\d[\d.,]*\s*(?:GR|G|KG|ML|CL|L|ST|STUKS?)\b/i.test(line)) || '' : ''),
       category: labelled(/^(?:presentatiegroep|categorie|locatie)\s*:\s*(.*)$/i) || labelled(/^locatie$/i),
-      location: header.find(line => /\bmeter\s+\d+.*\bplank\s+\d+/i.test(line)) || '',
+      location: ['meter', 'plank', 'positie'].map(label => {
+        const match = lines.join(' ').match(new RegExp('\\b' + label + '\\s*:?\\s*(\\d+[a-z]?)\\b', 'i'));
+        return match ? label + ' ' + match[1] : '';
+      }).filter(Boolean).join(', '),
       pack: labelled(/^collo[- ]?inhoud\s*:?\s*(.*)$/i),
       eans: /^\d{8,14}$/.test(ean) ? [ean] : [] });
   }
@@ -239,7 +242,14 @@
   const decoder = createDecoder();
   let current = null, generation = 0, entries = [], storageBroken = false;
   let fifo = parseFifo(undefined, new Set());
-  let fifoProducts = [];
+  let fifoProducts = [], lastRound = null;
+  function parseRoundReport(report) {
+    if (report == null) return null;
+    if (!Array.isArray(report.products) || report.products.length > 10 ||
+        typeof report.date !== 'string' || !Number.isFinite(Date.parse(report.date))) throw Error('Ongeldig FIFO-resultaat.');
+    const products = report.products.map(parseProduct);
+    return { products, fifo: parseFifo(report.fifo, new Set(products.map(p => p.article))), date: report.date };
+  }
   const allProducts = () => [...new Map([...fifoProducts, ...entries.map(e => e.product)].map(p => [p.article, p])).values()];
   let render = () => {}, notify = () => {}, requestsSeen = 0;
   let pageProduct = null, pageUrl = location.href, staleArticle = null;
@@ -275,20 +285,22 @@
       const catalog = new Map([...(data?.fifoProducts || []).map(parseProduct), ...next.map(e => e.product)].map(p => [p.article, p]));
       const nextFifo = parseFifo(data?.fifo, new Set(catalog.keys()));
       const selected = new Set(Object.values(nextFifo).flat().map(r => r.article));
-      entries = next; fifo = nextFifo; fifoProducts = [...catalog.values()].filter(p => selected.has(p.article));
+      const nextReport = parseRoundReport(data?.lastRound);
+      lastRound = nextReport; entries = next; fifo = nextFifo; fifoProducts = [...catalog.values()].filter(p => selected.has(p.article));
       storageBroken = false;
     } catch { storageBroken = true; }
   }
   load();
-  function save(next, nextFifo = fifo, extraProducts = []) {
+  function save(next, nextFifo = fifo, extraProducts = [], report = lastRound) {
     if (storageBroken) { notify('Opslag niet leesbaar. Bestaande gegevens worden niet overschreven.'); return false; }
     try {
       const catalog = new Map([...allProducts(), ...next.map(e => e.product), ...extraProducts.map(parseProduct)].map(p => [p.article, p]));
       const cleanedFifo = parseFifo(nextFifo, new Set(catalog.keys()));
       const selected = new Set(Object.values(cleanedFifo).flat().map(r => r.article));
       const nextProducts = [...catalog.values()].filter(p => selected.has(p.article));
-      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo, fifoProducts: nextProducts }));
-      entries = next; fifo = cleanedFifo; fifoProducts = nextProducts;
+      const nextReport = parseRoundReport(report);
+      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo, fifoProducts: nextProducts, lastRound: nextReport }));
+      lastRound = nextReport; entries = next; fifo = cleanedFifo; fifoProducts = nextProducts;
       return true;
     } catch { notify('Opslaan mislukt. Maak ruimte vrij of controleer Safari-opslag.'); return false; }
   }
@@ -668,7 +680,9 @@
       try {
         printWindow.opener = null;
         printWindow.document.open();
-        printWindow.document.write(fifoPrintDocument(allProducts().map(product => ({ product })), fifo, new Date(), controllerName));
+        const report = view === 'round' && roundResult ? roundResult : !chosenRows().length ? lastRound : null;
+        printWindow.document.write(fifoPrintDocument((report?.products || allProducts()).map(product => ({ product })),
+          report?.fifo || fifo, report ? new Date(report.date) : new Date(), controllerName));
         printWindow.document.close();
         const fit = () => fitFifoSheet(printWindow.document);
         printWindow.addEventListener('beforeprint', fit);
@@ -715,9 +729,9 @@
     notify = message => { (dialog.open ? shell : root).append(toast); toast.textContent = message; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6500); };
     let listSignature = '';
     let fifoSignature = '';
-    let round = null, roundFilter = 'zuivel', roundSignature = '', roundCurrentKey = null, namesDraft = '', askingNames = false;
+    let round = null, roundResult = null, roundFilter = 'zuivel', roundSignature = '', roundCurrentKey = null, namesDraft = '', askingNames = false;
     const categoryName = category => category === 'zuivel' ? 'Zuivel' : 'VVP';
-    const chosenRows = () => ['zuivel', 'vvp'].flatMap(category => fifo[category]
+    const chosenRows = (data = fifo) => ['zuivel', 'vvp'].flatMap(category => data[category]
       .filter(row => row.article).map(row => ({ ...row, category, key: category + ':' + row.article })));
     function focusRound() {
       const target = roundPage.querySelector('h2');
@@ -731,6 +745,7 @@
       const next = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
         fifo[category].map(row => ({ ...row, fifo: null, names: '' }))]));
       if (!save(entries, next)) return;
+      roundResult = null;
       round = selected.map(({ category, article, key }) => ({ category, article, key }));
       roundFilter = round[0].category; askingNames = false; namesDraft = ''; roundSignature = '';
       showView('round'); focusRound();
@@ -750,7 +765,7 @@
     }
     function renderRound() {
       if (view !== 'round' || !round) return;
-      const rows = chosenRows(), products = new Map(allProducts().map(p => [p.article, p]));
+      const rows = chosenRows(roundResult?.fifo || fifo), products = new Map((roundResult?.products || allProducts()).map(p => [p.article, p]));
       const active = round.map(item => rows.find(row => row.key === item.key)).filter(Boolean);
       const pending = active.filter(row => row.fifo === null);
       const current = pending.find(row => row.category === roundFilter);
@@ -797,7 +812,19 @@
         }
         const next = { ...fifo, [current.category]: fifo[current.category].map(row => row.article !== current.article ? row :
           { ...row, fifo: yes, names: yes ? '' : names.trim() }) };
-        if (!save(entries, next)) return;
+        const keys = new Set(round.map(item => item.key));
+        const completed = chosenRows(next).filter(row => keys.has(row.key));
+        if (completed.length && completed.every(row => row.fifo !== null)) {
+          const reportFifo = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
+            next[category].map(row => keys.has(category + ':' + row.article) ? row : emptyFifoRow())]));
+          const articles = new Set(completed.map(row => row.article));
+          const report = { fifo: reportFifo, products: allProducts().filter(p => articles.has(p.article)), date: new Date().toISOString() };
+          const cleared = Object.fromEntries(['zuivel', 'vvp'].map(category => [category,
+            next[category].map(row => keys.has(category + ':' + row.article) ? emptyFifoRow() : row)]));
+          // Archive results and clear selections together: a failed write preserves the round.
+          if (!save(entries, cleared, [], report)) return;
+          roundResult = lastRound;
+        } else if (!save(entries, next)) return;
         askingNames = false; namesDraft = ''; roundSignature = ''; render(); focusRound();
       }
       const answers = el('div', undefined, 'round-answers');
@@ -861,7 +888,7 @@
       const rows = chosenRows();
       if (rows.some(row => row.fifo === null) && (round || rows.some(row => row.fifo !== null))) {
         fifoPage.append(button('Verder met FIFO check', () => {
-          load(); round = chosenRows().map(({ category, article, key }) => ({ category, article, key }));
+          load(); roundResult = null; round = chosenRows().map(({ category, article, key }) => ({ category, article, key }));
           roundFilter = chosenRows().find(row => row.fifo === null)?.category || 'zuivel';
           askingNames = false; namesDraft = ''; roundSignature = '';
           showView('round'); focusRound();
@@ -870,6 +897,7 @@
       const start = button('Start FIFO check', startRound, 'round-primary start-round');
       start.disabled = storageBroken || !chosenRows().length;
       fifoPage.append(start);
+      if (lastRound && !rows.length) fifoPage.append(el('p', 'Je FIFO-producten zijn leeggemaakt. Met Print / PDF kun je de laatste afgeronde ronde nog printen.', 'fifo-help'));
       if (chosenRows().some(row => row.fifo !== null)) fifoPage.append(el('p', 'Een nieuwe ronde wist de vorige antwoorden. Je gekozen producten blijven bewaard.', 'fifo-help'));
     }
     function renderList() {
