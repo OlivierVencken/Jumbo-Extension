@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mijn vulcheck
 // @namespace    olivier.vulcheck
-// @version      0.5.8
+// @version      0.6.1
 // @description  Bewaar Jumbo-producten en controleer FIFO voor Zuivel en VVP.
 // @match        https://product.jumbo.com/*
 // @run-at       document-start
@@ -237,6 +237,8 @@
   const decoder = createDecoder();
   let current = null, generation = 0, entries = [], storageBroken = false;
   let fifo = parseFifo(undefined, new Set());
+  let fifoProducts = [];
+  const allProducts = () => [...new Map([...fifoProducts, ...entries.map(e => e.product)].map(p => [p.article, p])).values()];
   let render = () => {}, notify = () => {}, requestsSeen = 0;
   let pageProduct = null, pageUrl = location.href, staleArticle = null;
   let controllerName = '';
@@ -267,18 +269,24 @@
       const raw = localStorage.getItem(KEY);
       const data = raw ? JSON.parse(raw) : undefined;
       const next = data ? parseBackup(data) : [];
-      const nextFifo = parseFifo(data?.fifo, new Set(next.map(e => e.product.article)));
-      entries = next; fifo = nextFifo;
+      if (data?.fifoProducts !== undefined && (!Array.isArray(data.fifoProducts) || data.fifoProducts.length > 10)) throw Error('Ongeldige FIFO-producten.');
+      const catalog = new Map([...(data?.fifoProducts || []).map(parseProduct), ...next.map(e => e.product)].map(p => [p.article, p]));
+      const nextFifo = parseFifo(data?.fifo, new Set(catalog.keys()));
+      const selected = new Set(Object.values(nextFifo).flat().map(r => r.article));
+      entries = next; fifo = nextFifo; fifoProducts = [...catalog.values()].filter(p => selected.has(p.article));
       storageBroken = false;
     } catch { storageBroken = true; }
   }
   load();
-  function save(next, nextFifo = fifo) {
+  function save(next, nextFifo = fifo, extraProducts = []) {
     if (storageBroken) { notify('Opslag niet leesbaar. Bestaande gegevens worden niet overschreven.'); return false; }
     try {
-      const cleanedFifo = parseFifo(nextFifo, new Set(next.map(e => e.product.article)));
-      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo }));
-      entries = next; fifo = cleanedFifo;
+      const catalog = new Map([...allProducts(), ...next.map(e => e.product), ...extraProducts.map(parseProduct)].map(p => [p.article, p]));
+      const cleanedFifo = parseFifo(nextFifo, new Set(catalog.keys()));
+      const selected = new Set(Object.values(cleanedFifo).flat().map(r => r.article));
+      const nextProducts = [...catalog.values()].filter(p => selected.has(p.article));
+      localStorage.setItem(KEY, JSON.stringify({ version: VERSION, entries: next, fifo: cleanedFifo, fifoProducts: nextProducts }));
+      entries = next; fifo = cleanedFifo; fifoProducts = nextProducts;
       return true;
     } catch { notify('Opslaan mislukt. Maak ruimte vrij of controleer Safari-opslag.'); return false; }
   }
@@ -505,7 +513,8 @@
       button{cursor:pointer;color:inherit;border:0}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #222;outline-offset:3px}
       .launch{pointer-events:auto;margin:16px 16px calc(16px + env(safe-area-inset-bottom));width:44px;height:44px;display:grid;place-items:center;padding:10px;background:#ffcc00;border-radius:6px;box-shadow:0 2px 10px #0002}
       .save-product{pointer-events:auto;position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));width:44px;height:44px;display:grid;place-items:center;cursor:pointer}
-      .save-product input{width:26px;height:26px;margin:0;accent-color:#ffcc00;cursor:pointer;box-shadow:0 0 0 2px #fff;border-radius:3px}.save-product input:disabled{cursor:wait}
+      .product-trigger{display:grid;place-items:center;width:44px;height:44px;padding:10px;background:#fff;border:1px solid #e5e5e5;border-radius:6px;box-shadow:0 2px 8px #0001}.product-trigger:hover{background:#f5f5f5}.product-trigger[aria-expanded="true"]{background:#ffcc00;border-color:#ffcc00}
+      .product-menu{position:absolute;top:52px;right:0;width:min(290px,calc(100vw - 24px));padding:6px;background:#fff;border:1px solid #e5e5e5;border-radius:8px;box-shadow:0 6px 24px #0002}.product-menu p{margin:8px 10px;color:#666;font-size:13px;overflow-wrap:anywhere}.product-action{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:10px;text-align:left;background:transparent;border-radius:4px;font-size:14px}.product-action:hover{background:#f5f5f5}.product-action::before{content:'+';font-size:22px;width:24px;text-align:center;flex-shrink:0}.product-action[aria-pressed="true"]::before{content:'✓';color:#716000}.product-action:disabled,.product-trigger:disabled{opacity:.5;cursor:default}
       dialog{pointer-events:auto;position:fixed;inset:0 0 0 auto;width:min(100%,400px);height:100%;height:100dvh;max-height:100%;max-width:100%;margin:0;border:0;padding:0;background:#fff;color:#222;box-shadow:-4px 0 24px #0002}
       dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction:column}
       .head{display:flex;flex-shrink:0;align-items:center;justify-content:space-between;gap:8px;padding:12px;padding-top:calc(12px + env(safe-area-inset-top));border-bottom:4px solid #ffcc00}
@@ -530,10 +539,8 @@
         dialog[open]::backdrop{animation:backdrop-in 240ms ease-out}
         .list:not([hidden]),.fifo-page:not([hidden]){animation:content-in 180ms ease-out}
         .toast:not([hidden]){animation:content-in 200ms ease-out}
-        .save-product input:checked{animation:saved 220ms ease-out}
         button{transition:background-color 140ms ease,color 140ms ease,box-shadow 160ms ease,transform 140ms ease}
         button:enabled:active{transform:scale(.96)}
-        .save-product input{transition:box-shadow 160ms ease}
         .photo{transition:transform 180ms ease}
         .fifo-table select,.fifo-table input{transition:border-color 140ms ease,background-color 140ms ease}
         .fifo-table select:focus,.fifo-table input:focus{border-color:#8a7000;background-color:#fffdf2}
@@ -586,23 +593,67 @@
         if (launch.parentNode !== root) root.prepend(launch);
       }
     }
-    const quickSave = el('label', undefined, 'save-product'), quickCheck = el('input');
-    quickCheck.type = 'checkbox'; quickCheck.setAttribute('aria-label', 'Bewaar dit product');
-    quickSave.append(quickCheck); quickSave.hidden = true;
+    const quickSave = el('div', undefined, 'save-product');
+    const productMenu = el('div', undefined, 'product-menu');
+    productMenu.id = 'ov-product-menu'; productMenu.hidden = true;
+    const menuTitle = el('p');
+    const productTrigger = button('', () => {
+      refreshPage(); load(); render();
+      if (!activeProduct() || storageBroken) return;
+      productMenu.hidden = !productMenu.hidden;
+      productTrigger.setAttribute('aria-expanded', String(!productMenu.hidden));
+      if (!productMenu.hidden) actions.list.focus();
+    }, 'product-trigger');
+    setIcon(productTrigger, 'Product toevoegen', 'M8 3H5v18h14V3h-3 M9 2h6v4H9z M8 13h8 M12 9v8');
+    productTrigger.setAttribute('aria-expanded', 'false');
+    productTrigger.setAttribute('aria-controls', productMenu.id);
+    const actions = {};
+    const destinations = { list: 'Mijn lijst', zuivel: 'Zuivel FIFO', vvp: 'VVP FIFO' };
     let displayedArticle = null;
-    quickCheck.addEventListener('change', () => {
-      const checked = quickCheck.checked;
-      refreshPage(); load();
-      const product = activeProduct();
-      if (!product || product.article !== displayedArticle) {
-        render(); notify('De productpagina is veranderd. Probeer opnieuw.'); return;
-      }
-      if (checked) {
-        if (entries.length >= 10000) { notify('Je lijst is vol. Verwijder eerst een product.'); render(); return; }
-        save(addEntry(entries, { ...product, url: safeUrl(location.href, true) }));
-      } else save(entries.filter(e => e.product.article !== product.article));
-      render();
+    function closeProductMenu(restoreFocus = false) {
+      productMenu.hidden = true; productTrigger.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) productTrigger.focus();
+    }
+    for (const [destination, label] of Object.entries(destinations)) {
+      const action = button('', () => {
+        const expected = displayedArticle;
+        refreshPage(); load();
+        const product = activeProduct();
+        if (!product || product.article !== expected) {
+          closeProductMenu(); render(); notify('De productpagina is veranderd. Probeer opnieuw.'); return;
+        }
+        const snapshot = { ...product, url: safeUrl(location.href, true) };
+        let saved = false, removing = false;
+        if (destination === 'list') {
+          removing = entries.some(e => e.product.article === product.article);
+          if (!removing && entries.length >= 10000) { notify('Je lijst is vol. Verwijder eerst een product.'); return; }
+          saved = save(removing ? entries.filter(e => e.product.article !== product.article) : addEntry(entries, snapshot));
+        } else {
+          const rows = fifo[destination];
+          const existing = rows.findIndex(r => r.article === product.article);
+          removing = existing >= 0;
+          const index = removing ? existing : rows.findIndex(r => !r.article);
+          if (index < 0) { notify(label + ' is vol (5 producten). Maak eerst een rij vrij in Fifo check.'); return; }
+          const next = { ...fifo, [destination]: rows.map((r, i) => i !== index ? r :
+            { ...emptyFifoRow(), article: removing ? '' : product.article }) };
+          saved = save(entries, next, [snapshot]);
+        }
+        render();
+        if (saved) notify((removing ? 'Verwijderd uit ' : 'Toegevoegd aan ') + label + '.');
+      }, 'product-action');
+      action.dataset.destination = destination;
+      actions[destination] = action;
+    }
+    productMenu.append(menuTitle, ...Object.values(actions));
+    quickSave.append(productTrigger, productMenu); quickSave.hidden = true;
+    quickSave.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); closeProductMenu(true); }
     });
+    document.addEventListener('click', event => {
+      if (!event.composedPath().includes(quickSave)) closeProductMenu();
+    });
+    // Page scripts can move focus after a click. Only explicit dismissal should
+    // close this disclosure; losing focus does not mean the user clicked outside.
     const dialog = el('dialog'), shell = el('div', undefined, 'shell'), head = el('header', undefined, 'head');
     // Start focus on the header so Safari does not outline the first tab on opening.
     // It stays outside the tab order; keyboard navigation still highlights controls.
@@ -616,7 +667,7 @@
       try {
         printWindow.opener = null;
         printWindow.document.open();
-        printWindow.document.write(fifoPrintDocument(entries, fifo, new Date(), controllerName));
+        printWindow.document.write(fifoPrintDocument(allProducts().map(product => ({ product })), fifo, new Date(), controllerName));
         printWindow.document.close();
         const fit = () => fitFifoSheet(printWindow.document);
         printWindow.addEventListener('beforeprint', fit);
@@ -672,7 +723,7 @@
       listButton.setAttribute('aria-pressed', String(view === 'list'));
       fifoButton.setAttribute('aria-pressed', String(view === 'fifo'));
       if (view !== 'fifo') return;
-      const products = [...new Map(entries.map(e => [e.product.article, e.product])).values()]
+      const products = allProducts()
         .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
       const signature = JSON.stringify([storageBroken, fifo, products]);
       if (signature === fifoSignature) return;
@@ -680,7 +731,7 @@
       fifoPage.replaceChildren();
       if (storageBroken || !products.length) fifoPage.append(el('p', storageBroken ?
         'Je opgeslagen gegevens kunnen niet worden gelezen.' :
-        'Bewaar eerst producten in Mijn lijst. Daarna kun je ze hier kiezen.', 'fifo-help'));
+        'Open een product en voeg het via het productmenu toe aan Zuivel FIFO of VVP FIFO.', 'fifo-help'));
       for (const category of ['zuivel', 'vvp']) {
         const label = category === 'zuivel' ? 'Zuivel' : 'VVP';
         const section = el('section', undefined, 'fifo-section'), heading = el('h2', label);
@@ -787,12 +838,21 @@
         if (needsUpdate) save(entries.map(e => e.product.article === product.article ?
           { ...e, product: { ...e.product, ...(url ? { url } : {}), ...(product.image ? { image: product.image } : {}) } } : e));
       }
-      const exists = product && entries.some(e => e.product.article === product.article);
+      if (displayedArticle !== (product?.article || null)) closeProductMenu();
       displayedArticle = product?.article || null;
       quickSave.hidden = !isProductPage(location.href);
-      quickCheck.checked = Boolean(exists); quickCheck.disabled = !product || storageBroken;
-      quickCheck.setAttribute('aria-label', exists ? 'Verwijder dit product uit mijn lijst' : 'Bewaar dit product');
-      quickSave.title = product ? product.name + (exists ? ' · Op mijn lijst' : ' · Bewaren') : 'Product laden…';
+      productTrigger.disabled = !product || storageBroken;
+      if (quickSave.hidden || productTrigger.disabled) closeProductMenu();
+      menuTitle.textContent = product?.name || 'Product laden…';
+      quickSave.title = product?.name || 'Product laden…';
+      for (const [destination, action] of Object.entries(actions)) {
+        const selected = Boolean(product && (destination === 'list' ? entries.some(e => e.product.article === product.article) :
+          fifo[destination].some(r => r.article === product.article)));
+        action.disabled = !product || storageBroken;
+        action.setAttribute('aria-pressed', String(selected));
+        action.textContent = destinations[destination];
+        action.setAttribute('aria-label', (selected ? 'Verwijder uit ' : 'Voeg toe aan ') + destinations[destination]);
+      }
       renderList();
       renderFifo();
     };

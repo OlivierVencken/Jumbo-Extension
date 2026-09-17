@@ -48,10 +48,10 @@ function setup(initial = {}, beforeEval = () => {}) {
   w.document.querySelector('main').textContent = fusilli;
   w.eval(source);
   const root = w.document.querySelector('#ov-vulcheck').shadowRoot;
-  const checkbox = root.querySelector('.save-product input');
+  const listAction = root.querySelector('[data-destination="list"]');
   const stored = () => JSON.parse(w.localStorage.getItem('ov.vulcheck.v1'));
   const tick = async () => { await new Promise(resolve => w.setTimeout(resolve, 200)); };
-  return { dom, w, root, checkbox, stored, tick, errors };
+  return { dom, w, root, listAction, stored, tick, errors };
 }
 
 function backFixture(w) {
@@ -77,9 +77,9 @@ function recoveryClock(w) {
 }
 
 test('opening the current saved product closes the list without reloading', () => {
-  const { dom, root, checkbox, errors } = setup();
+  const { dom, root, listAction, errors } = setup();
   try {
-    checkbox.click(); root.querySelector('.launch').click();
+    listAction.click(); root.querySelector('.launch').click();
     root.querySelector('.product').click();
     assert.equal(root.querySelector('dialog').open, false);
     assert.equal(errors.length, 0);
@@ -147,44 +147,44 @@ test('observing the supplied close response recovers even without a captured cli
   }
 });
 
-test('checkbox saves once, survives reload, and reflects checklist removal', async () => {
+test('listAction saves once, survives reload, and reflects checklist removal', async () => {
   const first = setup();
   try {
-    assert.equal(first.checkbox.disabled, false);
+    assert.equal(first.listAction.disabled, false);
     assert.equal(first.root.querySelector('.save-product').hidden, false);
-    first.checkbox.click();
+    first.listAction.click();
     assert.equal(first.stored().entries.length, 1);
     assert.equal(first.stored().entries[0].product.name, 'JUMBO FUSILLI');
     assert.equal(first.stored().entries[0].done, false);
-    assert.equal(first.checkbox.checked, true);
+    assert.equal((first.listAction.getAttribute('aria-pressed') === 'true'), true);
     const saved = first.w.localStorage.getItem('ov.vulcheck.v1');
     const second = setup({ 'ov.vulcheck.v1': saved });
     try {
-      assert.equal(second.checkbox.checked, true);
+      assert.equal((second.listAction.getAttribute('aria-pressed') === 'true'), true);
       const launch = second.root.querySelector('.launch'); launch.click();
       second.root.querySelector('.remove').click();
-      assert.equal(second.checkbox.checked, false);
+      assert.equal((second.listAction.getAttribute('aria-pressed') === 'true'), false);
       assert.equal(second.stored().entries.length, 0);
-      second.checkbox.click();
+      second.listAction.click();
       assert.equal(second.stored().entries.length, 1);
-      second.checkbox.click();
+      second.listAction.click();
       assert.equal(second.stored().entries.length, 0);
     } finally { second.dom.window.close(); }
   } finally { first.dom.window.close(); }
 });
 
 test('SPA navigation clears the old product and saves the new one', async () => {
-  const { dom, w, root, checkbox, stored, tick } = setup();
+  const { dom, w, root, listAction, stored, tick } = setup();
   try {
     w.history.pushState({}, '', '/p/artikel/second-product');
     // Click before the observer runs: never save old DOM under the new route.
-    checkbox.click();
+    listAction.click();
     assert.equal(stored(), null);
     w.document.querySelector('main').textContent = fusilli.replace('717144', '123456').replace('JUMBO FUSILLI', 'JUMBO PENNE');
     await tick();
-    assert.equal(checkbox.disabled, false);
-    assert.equal(checkbox.checked, false);
-    checkbox.click();
+    assert.equal(listAction.disabled, false);
+    assert.equal((listAction.getAttribute('aria-pressed') === 'true'), false);
+    listAction.click();
     assert.equal(stored().entries[0].product.article, '123456');
     assert.equal(stored().entries[0].product.name, 'JUMBO PENNE');
     w.history.pushState({}, '', '/');
@@ -195,37 +195,37 @@ test('SPA navigation clears the old product and saves the new one', async () => 
 });
 
 test('late-rendered product details are detected without network interception', async () => {
-  const { dom, w, root, checkbox, tick } = setup();
+  const { dom, w, root, listAction, tick } = setup();
   try {
     w.document.querySelector('main').textContent = 'Laden…';
     await tick();
-    assert.equal(checkbox.disabled, true);
+    assert.equal(listAction.disabled, true);
     w.document.querySelector('main').textContent = fusilli;
     await tick();
-    assert.equal(checkbox.disabled, false);
+    assert.equal(listAction.disabled, false);
     assert.match(root.querySelector('.save-product').title, /JUMBO FUSILLI/);
   } finally { dom.window.close(); }
 });
 
-test('storage failure never leaves a falsely checked checkbox', () => {
-  const { dom, w, root, checkbox } = setup();
+test('storage failure never leaves a falsely checked listAction', () => {
+  const { dom, w, root, listAction } = setup();
   try {
     w.Storage.prototype.setItem = () => { throw new Error('QuotaExceededError'); };
-    checkbox.click();
-    assert.equal(checkbox.checked, false);
+    listAction.click();
+    assert.equal((listAction.getAttribute('aria-pressed') === 'true'), false);
     assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
   } finally { dom.window.close(); }
 });
 
 
-test('minimal list saves exact links and product photos, with no visible checkbox label', async () => {
-  const { dom, w, root, checkbox, stored, tick } = setup();
+test('minimal list saves exact links and product photos, with no visible listAction label', async () => {
+  const { dom, w, root, listAction, stored, tick } = setup();
   try {
     const image = w.document.createElement('img');
     image.src = 'https://images.jumbo.com/fusilli.png'; image.alt = 'JUMBO FUSILLI';
     w.document.querySelector('main').append(image);
-    await tick(); checkbox.click();
-    assert.equal(root.querySelector('.save-product').textContent, '');
+    await tick(); listAction.click();
+    assert.equal(root.querySelector('.product-trigger').textContent, '');
     assert.equal(stored().entries[0].product.url, url);
     assert.equal(stored().entries[0].product.image, image.src);
     assert.equal(root.querySelector('.product').href, url);
@@ -241,13 +241,13 @@ test('older products stay visible across days, deduplicate, and acquire links on
   const entries = ['2026-01-01', '2026-01-02'].map(day => ({
     id: day + ':' + p.article, day, product: p, done: true, note: 'Keep this note', added: day + 'T12:00:00Z'
   }));
-  const { dom, root, checkbox, stored } = setup({ 'ov.vulcheck.v1': JSON.stringify({ version: 1, entries }) });
+  const { dom, root, listAction, stored } = setup({ 'ov.vulcheck.v1': JSON.stringify({ version: 1, entries }) });
   try {
     assert.equal(root.querySelectorAll('.item').length, 1);
-    assert.equal(checkbox.checked, true);
+    assert.equal((listAction.getAttribute('aria-pressed') === 'true'), true);
     assert.equal(root.querySelector('.product').href, url);
     assert.equal(stored().entries[0].note, 'Keep this note');
-    checkbox.click();
+    listAction.click();
     assert.equal(stored().entries.length, 0);
   } finally { dom.window.close(); }
 });
@@ -319,6 +319,98 @@ test('PDF prefills the greeting name, retains it on article navigation, and refr
   } finally { dom.window.close(); preview.window.close(); }
 });
 
+test('product menu adds independent FIFO products, persists and exports them without list entries', () => {
+  const preview = new JSDOM('', { url: 'https://product.jumbo.com/' });
+  const { dom, w, root, stored, listAction } = setup({}, w => { w.open = () => preview.window; });
+  try {
+    const trigger = root.querySelector('.product-trigger'), menu = root.querySelector('.product-menu');
+    const zuivel = root.querySelector('[data-destination="zuivel"]');
+    const vvp = root.querySelector('[data-destination="vvp"]');
+    trigger.click();
+    assert.equal(menu.hidden, false);
+    assert.equal(root.activeElement, listAction);
+    zuivel.click(); vvp.click();
+    assert.deepEqual(stored().entries, []);
+    assert.equal(stored().fifo.zuivel[0].article, '717144');
+    assert.equal(stored().fifo.vvp[0].article, '717144');
+    assert.equal(stored().fifoProducts.length, 1);
+    listAction.click(); listAction.click();
+    assert.deepEqual(stored().entries, []);
+    assert.equal(stored().fifo.zuivel[0].article, '717144');
+    const second = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
+    try {
+      assert.equal(second.root.querySelector('[data-destination="zuivel"]').getAttribute('aria-pressed'), 'true');
+      second.root.querySelector('.fifo-button').click();
+      assert.match(second.root.querySelector('.fifo-table select').selectedOptions[0].textContent, /JUMBO FUSILLI/);
+    } finally { second.w.close(); }
+    zuivel.click();
+    assert.equal(stored().fifo.zuivel[0].article, '');
+    assert.equal(stored().fifo.vvp[0].article, '717144');
+    root.querySelector('.fifo-button').click(); root.querySelector('.print-fifo').click();
+    assert.match(preview.window.document.querySelector('tbody tr').textContent, /717144.*JUMBO FUSILLI/s);
+    vvp.click();
+    assert.deepEqual(stored().fifoProducts, []);
+    trigger.click();
+    listAction.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(menu.hidden, true);
+    assert.equal(root.activeElement, trigger);
+    trigger.click(); w.document.body.click();
+    assert.equal(menu.hidden, true);
+  } finally { w.close(); preview.window.close(); }
+});
+
+test('product menu stays open through delayed focus changes, refreshes, and option clicks', async () => {
+  const { w, root, tick } = setup();
+  try {
+    const trigger = root.querySelector('.product-trigger'), menu = root.querySelector('.product-menu');
+    const outside = w.document.createElement('button');
+    w.document.body.append(outside);
+    trigger.click();
+    await tick();
+    // Model a page script reclaiming focus after the menu opens, without a click.
+    outside.focus();
+    w.dispatchEvent(new w.StorageEvent('storage', { key: 'ov.vulcheck.v1' }));
+    await tick();
+    assert.equal(menu.hidden, false);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    for (const action of root.querySelectorAll('.product-action')) {
+      action.click();
+      await tick();
+      assert.equal(menu.hidden, false);
+    }
+    trigger.click();
+    assert.equal(menu.hidden, true);
+    trigger.click();
+    menu.querySelector('p').click();
+    assert.equal(menu.hidden, false);
+    outside.click();
+    assert.equal(menu.hidden, true);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  } finally { w.close(); }
+});
+
+test('full FIFO categories and failed writes preserve products and independent destinations', () => {
+  const { w, root, stored } = setup(fifoFixture());
+  try {
+    root.querySelector('.fifo-button').click();
+    for (let i = 0; i < 5; i++) change(w, root.querySelectorAll('[data-category="zuivel"] tbody tr')[i].querySelector('select'), String(100000 + i));
+    const before = JSON.stringify(stored());
+    const zuivel = root.querySelector('[data-destination="zuivel"]'), vvp = root.querySelector('[data-destination="vvp"]');
+    zuivel.click();
+    assert.equal(JSON.stringify(stored()), before);
+    assert.match(root.querySelector('.toast').textContent, /vol/);
+    const originalSet = w.Storage.prototype.setItem;
+    w.Storage.prototype.setItem = () => { throw Error('QuotaExceededError'); };
+    vvp.click();
+    assert.equal(vvp.getAttribute('aria-pressed'), 'false');
+    assert.equal(JSON.stringify(stored()), before);
+    w.Storage.prototype.setItem = originalSet;
+    vvp.click();
+    assert.equal(stored().fifo.vvp[0].article, '717144');
+    assert.equal(stored().entries.some(e => e.product.article === '717144'), false);
+  } finally { w.close(); }
+});
+
 test('FIFO has two five-row tables, unique saved choices, independent categories, and persistent answers', () => {
   const { dom, w, root, stored } = setup(fifoFixture());
   try {
@@ -350,7 +442,7 @@ test('FIFO has two five-row tables, unique saved choices, independent categories
   } finally { dom.window.close(); }
 });
 
-test('removing a saved product clears its FIFO row and failed writes restore the saved answer', () => {
+test('removing a saved product preserves its FIFO row and failed writes restore the saved answer', () => {
   const { dom, w, root, stored } = setup(fifoFixture());
   try {
     root.querySelector('.fifo-button').click();
@@ -363,14 +455,14 @@ test('removing a saved product clears its FIFO row and failed writes restore the
     assert.match(root.querySelector('.toast').textContent, /Opslaan mislukt/);
     w.Storage.prototype.setItem = originalSet;
     root.querySelector('.nav button').click(); root.querySelector('.remove').click();
-    assert.deepEqual(stored().fifo.zuivel[0], { article: '', fifo: null, names: '' });
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: null, names: '' });
   } finally { dom.window.close(); }
 });
 
-test('clearing the list persists an empty list and clears its FIFO selections', () => {
-  const { dom, w, root, checkbox, stored } = setup(fifoFixture());
+test('clearing the list preserves independent FIFO selections', () => {
+  const { dom, w, root, listAction, stored } = setup(fifoFixture());
   try {
-    checkbox.click(); root.querySelector('.launch').click();
+    listAction.click(); root.querySelector('.launch').click();
     const clear = root.querySelector('.clear-list');
     assert.equal(clear.hidden, false);
     assert.equal(clear.disabled, false);
@@ -381,10 +473,9 @@ test('clearing the list persists an empty list and clears its FIFO selections', 
     root.querySelector('.nav button').click();
     clear.click();
     assert.deepEqual(stored().entries, []);
-    for (const row of Object.values(stored().fifo).flat()) {
-      assert.deepEqual(row, { article: '', fifo: null, names: '' });
-    }
-    assert.equal(checkbox.checked, false);
+    assert.deepEqual(stored().fifo.zuivel[0], { article: '100000', fifo: true, names: '' });
+    assert.equal(stored().fifoProducts[0].article, '100000');
+    assert.equal((listAction.getAttribute('aria-pressed') === 'true'), false);
     assert.equal(root.querySelectorAll('.item').length, 0);
     assert.equal(clear.disabled, true);
     assert.equal(root.activeElement, root.querySelector('.close'));
