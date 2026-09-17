@@ -2,6 +2,16 @@
 
 Personal Jumbo checklist userscript for Safari/Userscripts.
 
+During a FIFO round, the barcode icon at the top-right of the product card opens
+its EAN barcode in a slide-up panel. Close it with either close button, Escape,
+or the dimmed backdrop. Each product stores one EAN; older saved arrays are read
+as a single code, and revisiting a product replaces an outdated code.
+If no code has been saved, revisit the product page and open its barcode details.
+Invalid or unsupported codes remain readable as numbers. Barcodes are generated
+locally using [JsBarcode](https://github.com/lindell/JsBarcode), bundled with its MIT
+license. Shelf locations wrap as a unit below the product group when needed,
+and only wrap internally when too wide for the available space.
+
 ## Development and production builds
 
 Use Node.js 20.19+ and install the pinned dependencies with `npm ci`.

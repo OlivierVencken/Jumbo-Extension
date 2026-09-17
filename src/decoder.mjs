@@ -38,12 +38,12 @@ function createDecoder() {
     const unit = article && cache.get(article['Producten.Unit_Article_Selected']);
     let result = null;
     if (article?.ArticleNumber && unit?.Description) {
-      const eans = [...cache.values()].filter(x => x['Producten.EanNumber_Article'] === selected)
-        .map(x => x.EanNumber).filter(x => typeof x === 'string' && /^\d{8,14}$/.test(x));
-      if (typeof unit.EanNumber === 'string' && /^\d{8,14}$/.test(unit.EanNumber)) eans.unshift(unit.EanNumber);
+      const validEan = value => typeof value === 'string' && /^\d{8,14}$/.test(value);
+      const ean = validEan(unit.EanNumber) ? unit.EanNumber : [...cache.values()]
+        .find(x => x['Producten.EanNumber_Article'] === selected && validEan(x.EanNumber))?.EanNumber || '';
       result = parseProduct({ article: article.ArticleNumber, name: unit.Description,
         size: [unit.NetContent, unit.ContentUnit].filter(Boolean).join(' '),
-        category: article.PresentationGroupDescription || '', eans,
+        category: article.PresentationGroupDescription || '', ean,
         pack: unit.ColloInhoud || '' });
     }
     // A shift may contain many searches; old runtime objects are not a persistent catalogue.

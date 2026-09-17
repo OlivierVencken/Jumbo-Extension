@@ -20,6 +20,26 @@ dialog::backdrop{background:#0005}.shell{height:100%;display:flex;flex-direction
 dialog.fifo-view{width:min(100%,760px)}.fifo-section h2{font-size:18px;margin:20px 0 10px}.fifo-help{font-size:14px;color:#666}
 .round-primary,.round-no,.round-back{min-height:48px;padding:12px 18px;border-radius:6px;font-weight:700;background:#ffcc00}.round-primary:disabled{opacity:.5;cursor:default}.start-round,.resume-round{display:block;width:100%;margin:20px 0 12px}.resume-round{background:#f2f2f2}.round-back{display:block;margin:24px auto 16px;background:#f2f2f2;font-weight:400}
 .round-page{max-width:540px;margin:0 auto;padding-top:20px;text-align:center}.round-filters{justify-content:center}.round-filters button{flex:1}.round-progress{font-size:14px;color:#666;margin:20px 0}.round-card{padding:24px 16px;background:#fafafa;border:1px solid #eee;border-radius:10px}.round-card img{width:120px;height:120px;object-fit:contain}.round-card h2{font-size:22px;margin:8px 0;overflow-wrap:anywhere}.round-card dl{margin:24px 0 0;text-align:left;display:grid;grid-template-columns:110px 1fr;gap:10px;font-size:14px}.round-card dt{color:#666}.round-card dd{margin:0;overflow-wrap:anywhere}.round-page h2:focus{outline:none}.round-page h3{font-size:20px;margin:24px 0 12px}.round-answers{display:flex;gap:12px}.round-answers button{flex:1;font-size:18px}.round-no{background:#fff;border:1px solid #bbb}.round-no[aria-pressed="true"]{border:2px solid #222;background:#f2f2f2}.round-names{margin-top:20px;text-align:left}.round-names label{display:block;font-size:14px;font-weight:700}.round-names input{width:100%;min-height:48px;border:1px solid #aaa;border-radius:5px;margin:8px 0 12px;padding:10px;font-size:16px}.round-names button{width:100%}
+.round-card dl{grid-template-columns:110px minmax(0,1fr)}
+.round-location{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.6em;row-gap:3px}
+.round-location>span{max-width:100%}.shelf-location{flex:0 1 auto}
+.round-card{position:relative;padding-top:56px}
+.round-barcode-toggle{position:absolute;top:12px;right:12px;display:grid;place-items:center;width:36px;height:36px;padding:7px;border:1px solid #bbb;border-radius:50%;background:transparent}
+.round-barcode-toggle:hover{background:#eee}.round-barcode-toggle svg{width:20px;height:20px}
+.round-barcodes{margin:12px auto 28px;max-width:480px}.round-barcode{background:#fff}
+.round-barcode svg{display:block;max-width:100%;height:auto;margin:0 auto}.barcode-number{margin:0;font-size:14px;overflow-wrap:anywhere}
+/* A separate top-layer modal dims the round and traps focus until dismissed. */
+dialog.barcode-sheet{inset:auto 0 0;width:100%;max-width:100%;height:auto;max-height:85dvh;margin:0;padding:56px 16px calc(16px + env(safe-area-inset-bottom));border-radius:12px 12px 0 0;text-align:center;overflow:auto;box-shadow:0 -4px 24px #0002}
+.barcode-sheet h2{font-size:22px;margin:8px 32px 16px;overflow-wrap:anywhere}.barcode-close{position:absolute;top:8px;right:8px}
+.barcode-dismiss{width:100%;min-height:48px;border:1px solid #bbb;border-radius:24px;background:#fff;font-weight:700}
+@media (prefers-reduced-motion:no-preference){
+@keyframes barcode-in{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+dialog.barcode-sheet[open]{animation:barcode-in 240ms ease-out}
+@supports (transition-behavior:allow-discrete) and (overlay:auto){
+dialog.barcode-sheet{transform:translateY(100%)}dialog.barcode-sheet[open]{transform:translateY(0)}
+@starting-style{dialog.barcode-sheet[open]{transform:translateY(100%)}}
+}
+}
 /* Keep motion on stable containers: data refreshes must not replay every row. */
 @media (prefers-reduced-motion:no-preference){
 @keyframes panel-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}

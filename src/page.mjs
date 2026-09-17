@@ -28,7 +28,7 @@ function activeProduct() {
   if (!isProductPage(location.href)) return null;
   if (pageProduct) {
     return current?.article === pageProduct.article ? { ...current, ...pageProduct,
-      eans: pageProduct.eans.length ? pageProduct.eans : current.eans } : pageProduct;
+      ean: pageProduct.ean || current.ean } : pageProduct;
   }
   return current;
 }

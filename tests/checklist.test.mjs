@@ -69,7 +69,7 @@ test('search routes skip product text extraction', async () => {
 test('reads the screenshot layout without an article-number label or semantic title', () => {
   assert.deepEqual(productFromText(fusilli, ['Eigenschappen', 'Beschikbaarheid'], url), {
     article: '717144', name: 'JUMBO FUSILLI', size: '500 GR', category: 'PASTA',
-    pack: '12 stuks', eans: ['8718452931859'], location: 'meter 2, plank 7, positie 3'
+    pack: '12 stuks', ean: '8718452931859', location: 'meter 2, plank 7, positie 3'
   });
 });
 
@@ -93,7 +93,7 @@ test('also supports labelled article fields and tab-separated properties', () =>
   const p = productFromText('Artikelnummer: 123456\nOmschrijving: Melk\nEAN\t8712345678901');
   assert.equal(p.article, '123456');
   assert.equal(p.name, 'Melk');
-  assert.deepEqual(p.eans, ['8712345678901']);
+  assert.equal(p.ean, '8712345678901');
 });
 
 function setup(initial = {}, beforeEval = () => {}) {
@@ -107,7 +107,7 @@ function setup(initial = {}, beforeEval = () => {}) {
   Object.defineProperty(w.document.body, 'innerText', { get: () => w.document.querySelector('main').textContent });
   w.HTMLElement.prototype.getClientRects = () => [{}];
   w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-  w.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
   w.confirm = () => true;
   for (const [key, value] of Object.entries(initial)) w.localStorage.setItem(key, value);
   beforeEval(w);
@@ -479,6 +479,28 @@ test('full FIFO categories and failed writes preserve products and independent d
   } finally { w.close(); }
 });
 
+test('FIFO barcodes handle missing and invalid codes and enrich saved products on revisit', async () => {
+  for (const code of ['', '8718452931850']) {
+    const { w, root, stored, tick } = setup();
+    try {
+      w.document.querySelector('main').textContent = fusilli.replace('8718452931859', code);
+      await tick();
+      root.querySelector('[data-destination="zuivel"]').click();
+      root.querySelector('.launch').click(); root.querySelector('.fifo-button').click();
+      root.querySelector('.start-round').click(); root.querySelector('.round-barcode-toggle').click();
+      assert.equal(root.querySelector('.round-barcodes svg'), null);
+      assert.match(root.querySelector('.round-barcodes').textContent, code ? /niet als barcode/ : /Geen EAN opgeslagen/);
+      assert.equal(stored().fifo.zuivel[0].fifo, null);
+      w.document.querySelector('main').textContent = fusilli;
+      await tick();
+      assert.equal(stored().fifoProducts[0].ean, '8718452931859');
+      assert.equal(stored().fifoProducts[0].eans, undefined);
+      root.querySelector('.round-barcode-toggle').click();
+      assert.ok(root.querySelector('.round-barcodes svg rect'));
+    } finally { w.close(); }
+  }
+});
+
 test('FIFO round shows selected products, filters categories, collects names only for no, and finishes', () => {
   const preview = new JSDOM('');
   const { w, root, stored } = setup({}, w => { w.open = () => preview.window; });
@@ -493,6 +515,17 @@ test('FIFO round shows selected products, filters categories, collects names onl
     assert.equal(root.querySelector('.round-page').hidden, false);
     assert.match(root.querySelector('.round-card').textContent, /717144/);
     assert.match(root.querySelector('.round-card').textContent, /meter 2, plank 7, positie 3/);
+    const barcodeToggle = root.querySelector('.round-barcode-toggle');
+    barcodeToggle.click();
+    assert.equal(barcodeToggle.getAttribute('aria-expanded'), 'true');
+    assert.ok(root.querySelector('.round-barcodes svg rect'));
+    assert.equal(root.querySelector('.barcode-number').textContent, 'EAN 8718452931859');
+    assert.equal(root.querySelector('.barcode-sheet').open, true);
+    assert.equal(root.querySelector('.round-card .round-barcodes'), null);
+    assert.equal(stored().fifo.zuivel[0].fifo, null);
+    root.querySelector('.barcode-dismiss').click();
+    assert.equal(root.querySelector('.barcode-sheet').open, false);
+    assert.equal(barcodeToggle.getAttribute('aria-expanded'), 'false');
     root.querySelector('[data-filter="vvp"]').click();
     root.querySelector('.round-no').click();
     const input = root.querySelector('.round-names input');
@@ -805,4 +838,14 @@ test('PDF generation failure leaves the preview available to retry', () => {
     assert.equal(preview.window.document.getElementById('download').hidden, true);
     assert.ok(preview.window.document.querySelector('.notes'));
   } finally { dom.window.close(); preview.window.close(); }
+});
+
+
+test('legacy EAN arrays migrate to a single code and new codes remain singular', () => {
+  const legacy = { article: '123', name: 'Test', eans: ['8718452931859', '8718452932329'] };
+  assert.equal(core.parseProduct(legacy).ean, '8718452931859');
+  assert.equal(core.parseProduct(legacy).eans, undefined);
+  assert.equal(core.parseProduct({ ...legacy, ean: '8718452932329' }).ean, '8718452932329');
+  assert.equal(core.parseProduct({ ...legacy, eans: [] }).ean, '');
+  assert.throws(() => core.parseProduct({ ...legacy, ean: ['8718452931859'] }));
 });

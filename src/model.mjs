@@ -12,10 +12,14 @@ function validDay(d) {
 }
 function parseProduct(p) {
   if (!p || typeof p !== 'object' || !/^\d{1,20}$/.test(p.article || '') ||
-      typeof p.name !== 'string' || !p.name.trim() || !Array.isArray(p.eans)) throw Error('Ongeldig product');
-  if (p.eans.length > 30 || p.eans.some(e => typeof e !== 'string' || !/^\d{8,14}$/.test(e))) throw Error('Ongeldige barcode');
+      typeof p.name !== 'string' || !p.name.trim()) throw Error('Ongeldig product');
+  // Read older backups, but keep only one code in the current model and storage.
+  if (p.ean === undefined && (!Array.isArray(p.eans) || p.eans.length > 30 ||
+      p.eans.some(e => typeof e !== 'string' || !/^\d{8,14}$/.test(e)))) throw Error('Ongeldige barcode');
+  const ean = p.ean === undefined ? p.eans[0] || '' : p.ean;
+  if (typeof ean !== 'string' || (ean && !/^\d{8,14}$/.test(ean))) throw Error('Ongeldige barcode');
   const product = { article: p.article, name: str(p.name), size: str(p.size, 60), category: str(p.category, 100),
-    eans: [...new Set(p.eans)], pack: str(p.pack, 30) };
+    ean, pack: str(p.pack, 30) };
   if (p.location) product.location = str(p.location, 200);
   const url = safeUrl(p.url, true), image = safeUrl(p.image);
   if (url) product.url = url;

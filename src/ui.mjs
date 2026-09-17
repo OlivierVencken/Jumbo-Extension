@@ -5,6 +5,7 @@ import { entries, storageBroken, fifo, fifoProducts, lastRound, roundInProgress,
 import { refreshPage, activeProduct, controllerName, startPageTracking } from './page.mjs';
 import { fifoPrintDocument, fitFifoSheet } from './print.mjs';
 import { fifoPdf } from './pdf.mjs';
+import JsBarcode from 'jsbarcode';
 
 let render = () => {}, notify = () => {};
 
@@ -200,11 +201,65 @@ function mount() {
     container.append(el('h2', product.name));
     if (product.size) container.append(el('p', product.size, 'sub'));
     const details = el('dl');
-    for (const [label, value] of [['Artikelnummer', product.article], ['Locatie', [product.category, product.location].filter(Boolean).join(' · ') || 'Niet bekend'], ['Collo inhoud', product.pack]]) {
-      if (value) details.append(el('dt', label), el('dd', value));
+    for (const [label, value] of [['Artikelnummer', product.article], ['EAN', product.ean || 'Niet bekend'], ['Locatie', [product.category, product.location].filter(Boolean).join(' · ') || 'Niet bekend'], ['Collo inhoud', product.pack]]) {
+      if (!value) continue;
+      const description = el('dd', value);
+      if (label === 'Locatie' && (product.category || product.location)) {
+        description.className = 'round-location'; description.replaceChildren();
+        if (product.category) description.append(el('span', product.category));
+        if (product.location) description.append(el('span', product.location, 'shelf-location'));
+      }
+      details.append(el('dt', label), description);
     }
     container.append(details);
+    const toggle = button('', () => openBarcode(product, toggle), 'round-barcode-toggle');
+    setIcon(toggle, 'Toon barcode', 'M5 7v10 M8 7v10 M12 7v10 M14 7v10 M18 7v10');
+    toggle.setAttribute('aria-haspopup', 'dialog');
+    toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', 'ov-barcode-sheet');
+    container.append(toggle);
   }
+  const barcodeSheet = el('dialog', undefined, 'barcode-sheet');
+  barcodeSheet.id = 'ov-barcode-sheet'; barcodeSheet.setAttribute('aria-labelledby', 'ov-barcode-title');
+  root.append(barcodeSheet);
+  let barcodeTrigger;
+  barcodeSheet.addEventListener('close', () => {
+    barcodeTrigger?.setAttribute('aria-expanded', 'false');
+    if (barcodeTrigger?.isConnected && dialog.open) barcodeTrigger.focus({ preventScroll: true });
+  });
+  barcodeSheet.addEventListener('click', event => {
+    if (event.target === barcodeSheet) {
+      const bounds = barcodeSheet.getBoundingClientRect();
+      if (event.clientY < bounds.top || event.clientX < bounds.left || event.clientX > bounds.right) barcodeSheet.close();
+    }
+  });
+  dialog.addEventListener('close', () => { if (barcodeSheet.open) barcodeSheet.close(); });
+  function openBarcode(product, trigger) {
+    barcodeTrigger = trigger;
+    const closeIcon = button('×', () => barcodeSheet.close(), 'close barcode-close');
+    closeIcon.setAttribute('aria-label', 'Barcode sluiten');
+    const title = el('h2', product.name); title.id = 'ov-barcode-title';
+    const content = el('div', undefined, 'round-barcodes');
+    const ean = product.ean;
+    if (!ean) content.append(el('p', 'Geen EAN opgeslagen. Open de productpagina en toon daar de barcode om deze op te halen.', 'sub'));
+    else {
+      const item = el('div', undefined, 'round-barcode');
+      const format = { 8: 'EAN8', 12: 'UPC', 13: 'EAN13', 14: 'ITF14' }[ean.length];
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      try {
+        if (!format) throw Error('Unsupported barcode');
+        JsBarcode(svg, ean, { format, width: 2, height: 80, margin: 20, displayValue: false });
+        svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `Barcode ${ean}`);
+        item.append(svg);
+      } catch (_) {
+        item.append(el('p', 'Deze code kan niet als barcode worden weergegeven.', 'sub'));
+      }
+      item.append(el('p', 'EAN ' + ean, 'barcode-number')); content.append(item);
+    }
+    const dismiss = button('Sluiten', () => barcodeSheet.close(), 'barcode-dismiss');
+    barcodeSheet.replaceChildren(closeIcon, title, content, dismiss);
+    trigger.setAttribute('aria-expanded', 'true'); barcodeSheet.showModal();
+  }
+
   function renderRound() {
     if (view !== 'round' || !round) return;
     const rows = chosenRows(roundResult?.fifo || fifo), products = new Map((roundResult?.products || allProducts()).map(p => [p.article, p]));
@@ -214,6 +269,7 @@ function mount() {
     if (roundCurrentKey !== (current?.key || null)) { askingNames = false; namesDraft = ''; roundCurrentKey = current?.key || null; }
     const signature = JSON.stringify([storageBroken, active, [...products], roundFilter, askingNames]);
     if (signature === roundSignature) return;
+    if (barcodeSheet.open) barcodeSheet.close();
     roundSignature = signature; roundPage.replaceChildren();
     const filters = el('nav', undefined, 'nav round-filters'); filters.setAttribute('aria-label', 'FIFO categorie');
     for (const category of ['zuivel', 'vvp']) {
@@ -398,11 +454,13 @@ function mount() {
     // Enrich legacy entries when their product is revisited, retaining notes and dates.
     if (product && !storageBroken) {
       const url = safeUrl(location.href, true);
+      const existing = allProducts().find(p => p.article === product.article);
+      const ean = product.ean || existing?.ean || '';
       const updates = { ...(url ? { url } : {}), ...(product.image ? { image: product.image } : {}),
+        ...(ean ? { ean } : {}),
         ...(product.location ? { location: product.location } : {}), ...(product.category ? { category: product.category } : {}) };
       const outdated = p => p.article === product.article && Object.entries(updates).some(([key, value]) => p[key] !== value);
       if (entries.some(e => outdated(e.product)) || fifoProducts.some(outdated)) {
-        const existing = allProducts().find(p => p.article === product.article);
         save(entries.map(e => outdated(e.product) ? { ...e, product: { ...e.product, ...updates } } : e),
           fifo, existing ? [{ ...existing, ...updates }] : []);
       }

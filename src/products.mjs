@@ -40,7 +40,7 @@ function productFromText(text, headings = [], url = '') {
       return match ? label + ' ' + match[1] : '';
     }).filter(Boolean).join(', '),
     pack: labelled(/^collo[- ]?inhoud\s*:?\s*(.*)$/i),
-    eans: /^\d{8,14}$/.test(ean) ? [ean] : [] });
+    ean: /^\d{8,14}$/.test(ean) ? ean : '' });
 }
 function readPageProduct(doc) {
   const visible = element => !element.closest('#ov-vulcheck, [hidden], [aria-hidden="true"]') &&

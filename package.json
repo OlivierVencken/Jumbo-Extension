@@ -13,5 +13,8 @@
     "@napi-rs/canvas": "^1.0.9",
     "esbuild": "0.28.2",
     "jsdom": "26.1.0"
+  },
+  "dependencies": {
+    "jsbarcode": "^3.12.3"
   }
 }
