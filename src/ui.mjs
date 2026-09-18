@@ -386,11 +386,11 @@ function mount() {
         askingNames = false; namesDraft = ''; roundSignature = '';
         showView('round'); focusRound();
       }, 'round-primary resume-round'));
+    } else {
+      const start = button('Start FIFO check', startRound, 'round-primary start-round');
+      start.disabled = storageBroken || !chosenRows().length;
+      fifoPage.append(start);
     }
-    const start = button('Start FIFO check', startRound, 'round-primary start-round');
-    start.disabled = storageBroken || roundInProgress || !chosenRows().length;
-    fifoPage.append(start);
-    if (roundInProgress) fifoPage.append(el('p', 'Er is al een FIFO-ronde bezig. Rond deze eerst af voordat je een nieuwe start.', 'fifo-help'));
   }
   function renderList() {
     // Entries are replaced after load/save, never mutated in place. Page scans and

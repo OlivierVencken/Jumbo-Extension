@@ -604,12 +604,12 @@ test('an active round blocks restarting before any answer, across reloads, and f
     staleStart.click();
     assert.equal(stored().roundInProgress, true);
     root.querySelector('.round-back').click();
-    assert.equal(root.querySelector('.start-round').disabled, true);
+    assert.equal(root.querySelector('.start-round'), null);
     assert.ok(root.querySelector('.resume-round'));
     const reloaded = setup({ 'ov.vulcheck.v1': JSON.stringify(stored()) });
     try {
       reloaded.root.querySelector('.fifo-button').click();
-      assert.equal(reloaded.root.querySelector('.start-round').disabled, true);
+      assert.equal(reloaded.root.querySelector('.start-round'), null);
       reloaded.root.querySelector('.resume-round').click();
       assert.ok(reloaded.root.querySelector('.round-yes'));
     } finally { reloaded.w.close(); }
